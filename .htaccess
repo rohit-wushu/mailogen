@@ -1,0 +1,31 @@
+# Root hardening.
+#
+# RECOMMENDED: on Hostinger set your domain's document root to the /public
+# folder. If you cannot, this file (at the project root = web root) redirects
+# visitors into /public and blocks direct access to application internals.
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Block direct web access to sensitive directories.
+    RewriteRule ^(config|lib|models|controllers|includes|cron|database|install/.*\.lock)(/|$) - [F,L]
+
+    # Requests already targeting /public/... are left alone.
+    RewriteRule ^public/ - [L]
+
+    # If the docroot is the project root, serve real files/directories that
+    # live under public/ (assets, uploads, tracking pixels, install) directly.
+    RewriteCond %{DOCUMENT_ROOT}/mailogen/public/$1 -f [OR]
+    RewriteCond %{DOCUMENT_ROOT}/mailogen/public/$1 -d
+    RewriteRule ^(.*)$ public/$1 [L]
+
+    # Everything else -> the front controller.
+    RewriteRule ^(.*)$ public/index.php?r=$1 [QSA,L]
+</IfModule>
+
+Options -Indexes
+
+# Deny access to dotfiles and the config.
+<FilesMatch "^(\.|config\.php|.*\.sql)">
+    Require all denied
+</FilesMatch>

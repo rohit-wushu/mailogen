@@ -1,0 +1,24 @@
+# --- Secrets & local state (NEVER commit) ---
+config/config.php
+config/installed.lock
+install/installed.lock
+.env
+
+# --- User uploads & generated files ---
+uploads/*
+!uploads/.gitkeep
+
+# --- Logs / temp ---
+*.log
+logs/
+storage/cache/
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# --- Deploy artifacts ---
+*.zip

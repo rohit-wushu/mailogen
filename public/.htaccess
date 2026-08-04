@@ -1,0 +1,25 @@
+# Eventogen Mailer - front controller routing
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Serve real files/directories directly (assets, tracking, unsubscribe).
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Everything else -> front controller as ?r=<path>
+    RewriteRule ^(.*)$ index.php?r=$1 [QSA,L]
+</IfModule>
+
+# Security headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Prevent directory listing
+Options -Indexes
+
+# Default document
+DirectoryIndex index.php
