@@ -92,6 +92,7 @@ if (in_array($__route, ['dashboard', '', 'reports'], true)): ?>
           <?php if ($__pendingReq > 0): ?><span class="badge bg-danger rounded-pill ms-auto"><?= $__pendingReq ?></span><?php endif; ?>
         </a>
         <?= $nav('admin/ses', 'Amazon SES', 'cloud-arrow-up', false, false, 'red') ?>
+        <?= $nav('admin/mail', 'System Email', 'envelope-paper-fill', false, false, 'blue') ?>
         <?= $nav('admin/deliverability', 'Deliverability', 'activity', false, false, 'orange') ?>
         <?= $nav('admin/suppression', 'Global Suppression', 'slash-circle-fill', false, false, 'teal') ?>
         <div class="sidebar-section">Platform</div>
@@ -120,7 +121,6 @@ if (in_array($__route, ['dashboard', '', 'reports'], true)): ?>
         </div>
       </div>
 
-      <?= $nav('settings',   'Settings',    'gear-fill', false, false, 'pink') ?>
       <?= $nav('campaigns',  'Campaigns',   'send-fill', false, false, 'pink') ?>
 
       <?= $nav('templates',  'Templates',   'file-richtext-fill', false, false, 'orange') ?>
@@ -137,6 +137,7 @@ if (in_array($__route, ['dashboard', '', 'reports'], true)): ?>
       </div>
 
       <?= $nav('billing',    'Billing & Plans', 'credit-card-2-front-fill', false, false, 'violet') ?>
+      <?= $nav('settings',   'Settings',    'gear-fill', false, false, 'pink') ?>
       <?php endif; ?>
     </nav>
 
@@ -174,7 +175,7 @@ if (in_array($__route, ['dashboard', '', 'reports'], true)): ?>
         ?>
         <h1><?= e($pageTitle ?? ($__isDashboard ? 'Dashboard' : '')) ?></h1>
         <?php if ($__isDashboard): ?>
-          <p class="welcome">Welcome back, <?= e($__first) ?> <span style="filter:grayscale(0)">👋</span></p>
+          <p class="welcome">Welcome back, <?= e($__first) ?> <span class="wave-emoji">👋</span></p>
         <?php endif; ?>
       </div>
 
@@ -256,9 +257,56 @@ if (in_array($__route, ['dashboard', '', 'reports'], true)): ?>
         <script>window.__flashes = <?= js($__flashes) ?>;</script>
       <?php endif; ?>
 
-      <?php if ($__user && (int) ($__user['is_verified'] ?? 1) === 0 && !$__isAdmin): ?>
-        <div class="alert alert-warning d-flex align-items-center">
-          <i class="bi bi-envelope-exclamation me-2"></i>
-          Please verify your email address to unlock sending. Check your inbox for the verification link.
+      <?php $__unverified = $__user && (int) ($__user['is_verified'] ?? 1) === 0 && !$__isAdmin; ?>
+      <?php if ($__unverified): ?>
+        <div class="alert alert-warning d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <span><i class="bi bi-envelope-exclamation me-2"></i>Please verify your email address to unlock campaigns. Check your inbox for the verification link.</span>
+          <button type="button" class="alert-link small fw-semibold btn btn-link p-0" data-bs-toggle="modal" data-bs-target="#verifyModal">Resend email</button>
         </div>
+
+        <!-- Blocks campaign actions in place — CampaignController redirects here instead of to a separate page. -->
+        <div class="modal fade" id="verifyModal" tabindex="-1">
+          <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-envelope-exclamation me-1"></i> Verify your email to continue</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+              </div>
+              <div class="modal-body">
+                <p class="text-muted">We sent a verification link to <strong><?= e($__user['email'] ?? '') ?></strong>. Click it to unlock campaigns — creating, editing and sending are all on hold until then.</p>
+                <div id="verifyModalResult"></div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-primary" id="verifyModalResend"><i class="bi bi-arrow-repeat"></i> Resend verification email</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <script>
+        document.getElementById('verifyModalResend').addEventListener('click', function () {
+          const btn = this;
+          const r = document.getElementById('verifyModalResult');
+          btn.disabled = true;
+          const original = btn.innerHTML;
+          btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Sending…';
+          fetch(window.APP_URL + '/verify/resend', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ _csrf: window.CSRF })
+          }).then(x => x.json()).then(res => {
+            if (res.ok) {
+              r.innerHTML = '<div class="alert alert-success py-2 mb-0"><i class="bi bi-check-circle-fill"></i> Verification email sent — check your inbox.</div>';
+            } else {
+              r.innerHTML = '<div class="alert alert-danger py-2 mb-0"><i class="bi bi-x-circle-fill"></i> ' + (res.error || 'Could not send. Please try again.') + '</div>';
+            }
+          }).catch(() => { r.innerHTML = '<div class="alert alert-danger py-2 mb-0">Request failed. Please try again.</div>'; })
+            .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+        });
+        <?php if ($__route === 'campaigns'): ?>
+        document.addEventListener('DOMContentLoaded', function () {
+          new bootstrap.Modal('#verifyModal').show();
+        });
+        <?php endif; ?>
+        </script>
       <?php endif; ?>

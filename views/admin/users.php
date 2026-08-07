@@ -8,7 +8,7 @@
 <div class="card">
   <div class="table-responsive">
     <table class="table table-hover align-middle mb-0">
-      <thead><tr><th>Name</th><th>Email</th><th>Plan</th><th>Role</th><th>Status</th><th>Last login</th><th class="text-end">Actions</th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Plan</th><th class="text-end">Contacts</th><th class="text-end">Campaigns</th><th class="text-end">Sent</th><th>Role</th><th>Status</th><th>Last login</th><th class="text-end">Actions</th></tr></thead>
       <tbody>
         <?php foreach ($users as $u): ?>
           <tr>
@@ -23,6 +23,9 @@
                 </select>
               </form>
             </td>
+            <td class="text-end"><?= number_format((int) $u['contact_total']) ?></td>
+            <td class="text-end"><?= number_format((int) $u['campaign_total']) ?></td>
+            <td class="text-end fw-semibold"><?= number_format((int) $u['sent_total']) ?></td>
             <td><span class="badge bg-<?= $u['role'] === 'admin' ? 'danger' : 'secondary' ?>-subtle text-<?= $u['role'] === 'admin' ? 'danger' : 'secondary' ?>-emphasis"><?= e($u['role']) ?></span></td>
             <td><?= (int) $u['status'] === 1 ? '<span class="status-pill status-active">Active</span>' : '<span class="status-pill status-unsubscribed">Suspended</span>' ?></td>
             <td class="small text-muted"><?= fmt_dt($u['last_login_at']) ?></td>

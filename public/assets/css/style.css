@@ -572,6 +572,16 @@ a { text-decoration: none; }
 .aa-illustration { position: relative; z-index: 1; margin: 10px 0; }
 .aa-svg { width: 100%; height: auto; max-width: 320px; }
 .aa-headline--light h2 { color: #0a2540; }
+
+.wave-emoji { display: inline-block; transform-origin: 70% 70%; animation: waveHand 2.2s ease-in-out infinite; }
+@keyframes waveHand {
+  0%, 60%, 100% { transform: rotate(0deg); }
+  10% { transform: rotate(14deg); }
+  20% { transform: rotate(-8deg); }
+  30% { transform: rotate(14deg); }
+  40% { transform: rotate(-4deg); }
+  50% { transform: rotate(10deg); }
+}
 .aa-headline--light p { color: #33455c; opacity: 1; }
 @media (max-width: 1100px) { .aa-svg { max-width: 300px; } }
 

@@ -34,17 +34,37 @@ final class DashboardController extends BaseController
             'topCampaign'     => $top,
             'smtpAccounts'    => $smtpAccounts,
             'onboarding'      => Stats::onboardingProgress($this->user),
-            'greeting'        => self::timeOfDayGreeting(),
+            'greeting'        => self::pickGreeting(),
             'firstName'       => explode(' ', trim((string) ($this->user['name'] ?? 'there')))[0] ?: 'there',
         ], 'Dashboard');
     }
 
-    private static function timeOfDayGreeting(): string
+    /** A varied, time-of-day-aware greeting line (name is interpolated by the view). */
+    private static function pickGreeting(): string
     {
         $hour = (int) date('G');
         if ($hour < 12) {
-            return 'Morning';
+            $pool = [
+                'Rise and shine',
+                'Morning! Let\'s make some inboxes happy',
+                'Coffee in hand? Let\'s get sending',
+                'Good morning, champion',
+            ];
+        } elseif ($hour < 17) {
+            $pool = [
+                'Hope your day is going well',
+                'Let\'s keep the momentum going',
+                'Afternoon! Ready for a win?',
+                'Good to see you',
+            ];
+        } else {
+            $pool = [
+                'Burning the midnight oil?',
+                'Evening! Let\'s wrap up strong',
+                'Welcome back, night owl',
+                'Good evening, superstar',
+            ];
         }
-        return $hour < 17 ? 'Afternoon' : 'Evening';
+        return $pool[array_rand($pool)];
     }
 }

@@ -245,7 +245,7 @@ final class Mailer
      */
     public static function sendSystem(string $to, string $subject, string $html, ?int $userId = null): bool
     {
-        $account = self::systemAccount($userId);
+        $account = self::dedicatedSystemAccount() ?? self::systemAccount($userId);
         if ($account !== null) {
             $res = self::sendNow($account, $to, $subject, $html);
             if ($res['ok']) {
@@ -260,6 +260,32 @@ final class Mailer
         $headers = "MIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n"
                  . 'From: ' . APP_NAME . ' <no-reply@' . $host . ">\r\n";
         return @mail($to, $subject, $html, $headers);
+    }
+
+    /** Admin-configured platform credentials for transactional mail, if enabled and complete (see AdminController::mail()). */
+    private static function dedicatedSystemAccount(): ?array
+    {
+        if (Setting::get('sys_smtp_enabled', '0') !== '1') {
+            return null;
+        }
+        $host      = trim((string) Setting::get('sys_smtp_host', ''));
+        $username  = trim((string) Setting::get('sys_smtp_username', ''));
+        $password  = (string) Setting::get('sys_smtp_password', '');
+        $fromEmail = trim((string) Setting::get('sys_smtp_from_email', ''));
+        if ($host === '' || $username === '' || $password === '' || $fromEmail === '') {
+            return null;
+        }
+        return [
+            'host'       => $host,
+            'port'       => (int) (Setting::get('sys_smtp_port', '587') ?: 587),
+            'encryption' => Setting::get('sys_smtp_encryption', 'tls') ?: 'tls',
+            'username'   => $username,
+            'password'   => $password,
+            'from_email' => $fromEmail,
+            'from_name'  => trim((string) Setting::get('sys_smtp_from_name', '')) ?: APP_NAME,
+            'user_id'    => 0,
+            'domain_id'  => null,
+        ];
     }
 
     /** Pick an enabled SMTP account to send transactional mail through. */

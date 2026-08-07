@@ -68,14 +68,23 @@ abstract class BaseController
         }
     }
 
+    /**
+     * Blocks a campaign action until the logged-in person verifies their own
+     * email. Sends them back to the campaigns list — the one campaign route
+     * that always renders rather than bouncing here — where the layout
+     * auto-opens the "Verify your email" modal in place (see
+     * includes/layout/header.php). No navigation to a separate page.
+     */
+    protected function requireVerified(): void
+    {
+        if ($this->user && (int) ($this->user['is_verified'] ?? 1) === 0 && $this->user['role'] !== 'admin') {
+            redirect('campaigns');
+        }
+    }
+
     protected function requireAuth(): void
     {
         Auth::require();
-        // Force email verification for non-admins (configurable).
-        if ($this->user && (int) $this->user['is_verified'] === 0 && $this->user['role'] !== 'admin') {
-            // Allow access but the UI nudges them; uncomment to hard-gate:
-            // redirect('verify-notice');
-        }
         // New accounts must finish the onboarding wizard (company/address —
         // feeds the CAN-SPAM footer requirement) before reaching anything else.
         if ($this->user && $this->user['role'] !== 'admin' && empty($this->user['onboarding_completed_at'])) {

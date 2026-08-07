@@ -210,6 +210,40 @@ final class AuthController extends BaseController
         view_bare('auth/reset', ['token' => $token], 'Reset password');
     }
 
+    /** Fired from the "Verify your email" modal (see includes/layout/header.php) — same page, no navigation. */
+    public function resendVerify(): void
+    {
+        $this->requireAuth();
+        csrf_guard();
+        $wantsJson = ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
+
+        if ((int) ($this->user['is_verified'] ?? 1) === 1) {
+            if ($wantsJson) {
+                json_response(['ok' => true, 'alreadyVerified' => true]);
+            }
+            redirect('dashboard');
+        }
+
+        if (RateLimiter::tooMany('resend-verify:' . $this->actorId(), 3, 900)) {
+            $msg = 'Too many resend attempts. Please wait a few minutes and try again.';
+            if ($wantsJson) {
+                json_response(['ok' => false, 'error' => $msg]);
+            }
+            flash('error', $msg);
+            $this->back('dashboard');
+        }
+
+        $token = bin2hex(random_bytes(20));
+        User::update($this->actorId(), ['verify_token' => $token]);
+        self::sendVerificationEmail(['id' => $this->actorId(), 'name' => $this->user['name'] ?? '', 'email' => $this->user['email'] ?? '', 'verify_token' => $token]);
+
+        if ($wantsJson) {
+            json_response(['ok' => true]);
+        }
+        flash('success', 'Verification email sent — check your inbox.');
+        $this->back('dashboard');
+    }
+
     public function verify(): void
     {
         $token = str_input('token');

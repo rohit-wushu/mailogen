@@ -14,7 +14,7 @@ $sparkColors = [
 <div class="card mb-4 border-0">
   <div class="card-body">
     <div class="gs-wrap">
-      <h2 class="gs-title">Good <?= e($greeting ?? 'Day') ?>, <?= e($firstName ?? 'there') ?> 👋</h2>
+      <h2 class="gs-title"><?= e($greeting ?? 'Welcome') ?>, <?= e($firstName ?? 'there') ?> <span class="wave-emoji">👋</span></h2>
       <p class="gs-sub">Welcome to <?= e(Site::name()) ?>! To send your first email campaign, please complete these simple steps.</p>
       <div class="gs-timeline">
         <?php foreach ($onboarding['steps'] as $i => $s):

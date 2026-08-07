@@ -7,6 +7,11 @@ final class CampaignController extends BaseController
     public function index(): void
     {
         $this->requireAuth();
+        // Not requireVerified() — this is the safe-harbor page that
+        // requireVerified() itself redirects blocked actions back to, so
+        // it must render rather than redirect. The list shows fine either
+        // way; the "Verify your email" modal (auto-opened by the layout
+        // when unverified) blocks interacting with it further.
         $this->render('campaigns/index', [
             'campaigns' => Campaign::withStats($this->uid()),
         ], 'Campaigns');
@@ -15,6 +20,7 @@ final class CampaignController extends BaseController
     public function edit(): void
     {
         $this->requireAuth();
+        $this->requireVerified();
         $id = int_input('id');
         $campaign = $id ? Campaign::findForUser($id, $this->uid()) : null;
 
@@ -39,6 +45,7 @@ final class CampaignController extends BaseController
     public function store(): void
     {
         $this->requireAuth();
+        $this->requireVerified();
         csrf_guard();
 
         $name = str_input('name');
@@ -190,6 +197,7 @@ final class CampaignController extends BaseController
     public function sheetPreview(): void
     {
         $this->requireAuth();
+        $this->requireVerified();
         $url = trim((string) input('sheet_url', ''));
         if ($url === '') {
             json_response(['ok' => false, 'error' => 'Paste a Google Sheet link first.']);
@@ -218,6 +226,7 @@ final class CampaignController extends BaseController
     public function show(): void
     {
         $this->requireAuth();
+        $this->requireVerified();
         $campaign = Campaign::findForUser(int_input('id'), $this->uid());
         if (!$campaign) {
             redirect('campaigns');
@@ -266,6 +275,7 @@ final class CampaignController extends BaseController
     public function sendTest(): void
     {
         $this->requireAuth();
+        $this->requireVerified();
         csrf_guard();
         $campaign = Campaign::findForUser(int_input('id'), $this->uid());
         if (!$campaign) {
@@ -372,6 +382,7 @@ final class CampaignController extends BaseController
     public function sendNow(): void
     {
         $this->requireAuth();
+        $this->requireVerified();
         csrf_guard();
         $campaign = Campaign::findForUser(int_input('id'), $this->uid());
         if (!$campaign) {
@@ -396,6 +407,7 @@ final class CampaignController extends BaseController
     public function schedule(): void
     {
         $this->requireAuth();
+        $this->requireVerified();
         csrf_guard();
         $campaign = Campaign::findForUser(int_input('id'), $this->uid());
         if (!$campaign) {
@@ -428,6 +440,7 @@ final class CampaignController extends BaseController
     public function reopen(): void
     {
         $this->requireAuth();
+        $this->requireVerified();
         csrf_guard();
         $campaign = Campaign::findForUser(int_input('id'), $this->uid());
         if (!$campaign) {
@@ -447,6 +460,7 @@ final class CampaignController extends BaseController
     public function unschedule(): void
     {
         $this->requireAuth();
+        $this->requireVerified();
         csrf_guard();
         $campaign = Campaign::findForUser(int_input('id'), $this->uid());
         if (!$campaign) {
@@ -462,6 +476,7 @@ final class CampaignController extends BaseController
     public function pause(): void
     {
         $this->requireAuth();
+        $this->requireVerified();
         csrf_guard();
         $campaign = Campaign::findForUser(int_input('id'), $this->uid());
         if ($campaign) {
@@ -477,6 +492,7 @@ final class CampaignController extends BaseController
     public function resume(): void
     {
         $this->requireAuth();
+        $this->requireVerified();
         csrf_guard();
         $campaign = Campaign::findForUser(int_input('id'), $this->uid());
         if ($campaign) {
@@ -491,6 +507,7 @@ final class CampaignController extends BaseController
     public function delete(): void
     {
         $this->requireAuth();
+        $this->requireVerified();
         csrf_guard();
         Campaign::delete(int_input('id'), $this->uid());
         flash('success', 'Campaign deleted.');

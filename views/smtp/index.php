@@ -132,10 +132,11 @@ foreach ($domains as $dm) { $domainById[(int) $dm['id']] = $dm; }
           <div class="col-md-6"><label class="form-label">Label *</label><input class="form-control" name="label" id="label" placeholder="e.g. Google Workspace 1" required></div>
           <div class="col-md-6">
             <label class="form-label">Provider</label>
-            <select class="form-select" name="provider" id="provider" onchange="applyPreset(PRESETS, this.value, 'sm_')">
+            <select class="form-select" name="provider" id="provider" onchange="applyPreset(PRESETS, this.value, 'sm_'); renderProviderGuide(this.value)">
               <?php foreach ($presets as $key => $_): ?><option value="<?= e($key) ?>"><?= e(provider_label($key)) ?></option><?php endforeach; ?>
             </select>
           </div>
+          <div class="col-12"><div id="providerGuide"></div></div>
           <div class="col-md-6"><label class="form-label">Host *</label><input class="form-control" name="host" id="sm_host" required></div>
           <div class="col-md-3"><label class="form-label">Port *</label><input class="form-control" name="port" id="sm_port" value="587" required></div>
           <div class="col-md-3"><label class="form-label">Encryption</label><select class="form-select" name="encryption" id="sm_encryption"><option value="tls">TLS</option><option value="ssl">SSL</option><option value="none">None</option></select></div>
@@ -164,7 +165,6 @@ foreach ($domains as $dm) { $domainById[(int) $dm['id']] = $dm; }
             <div class="form-text">Add domains under <a href="<?= url('domains') ?>">Sending Domains</a> first.</div>
           </div>
         </div>
-        <div class="alert alert-info small mt-3 mb-0"><i class="bi bi-info-circle"></i> For Gmail / Google Workspace use an <strong>App Password</strong> (2-Step Verification required).</div>
         <div id="testResult" class="mt-3"></div>
       </div>
       <div class="modal-footer justify-content-between">
@@ -220,12 +220,95 @@ foreach ($domains as $dm) { $domainById[(int) $dm['id']] = $dm; }
 
 <script>
 const PRESETS = <?= json_encode($presets) ?>;
+
+const PROVIDER_GUIDES = {
+  gmail: {
+    title: 'Getting your Gmail credentials',
+    steps: [
+      'Open <strong>Google Account &rarr; Security</strong> and turn on <strong>2-Step Verification</strong> (required for app passwords).',
+      'Search settings for <strong>App passwords</strong>, then create one for "Mail".',
+      'Copy the 16-character password Google shows you &mdash; paste it in <strong>Password</strong> below (not your normal Gmail password).',
+      '<strong>Username</strong> and <strong>From email</strong> = your full @gmail.com address.',
+    ],
+    link: { url: 'https://myaccount.google.com/apppasswords', label: 'Open Google App Passwords' },
+  },
+  google_workspace: {
+    title: 'Getting your Google Workspace credentials',
+    steps: [
+      'Open <strong>Google Account &rarr; Security</strong> and turn on <strong>2-Step Verification</strong> (required for app passwords). Your admin must allow this if it\'s managed centrally.',
+      'Search settings for <strong>App passwords</strong>, then create one for "Mail".',
+      'Copy the 16-character password Google shows you &mdash; paste it in <strong>Password</strong> below.',
+      '<strong>Username</strong> and <strong>From email</strong> = your full Workspace address (e.g. you@yourcompany.com).',
+    ],
+    link: { url: 'https://myaccount.google.com/apppasswords', label: 'Open Google App Passwords' },
+  },
+  brevo: {
+    title: 'Getting your Brevo SMTP credentials',
+    steps: [
+      'Log in to Brevo and open <strong>SMTP &amp; API &rarr; SMTP</strong> in the left sidebar.',
+      'Copy the <strong>SMTP login</strong> shown there (looks like an email address) into <strong>Username</strong>.',
+      'Copy your <strong>SMTP key</strong> (or generate a new one) into <strong>Password</strong>.',
+      'Host/port below are already filled in for you.',
+    ],
+    link: { url: 'https://app.brevo.com/settings/keys/smtp', label: 'Open Brevo SMTP settings' },
+  },
+  ses: {
+    title: 'Getting your Amazon SES SMTP credentials',
+    steps: [
+      'Open the <strong>Amazon SES console &rarr; SMTP settings</strong> for the region you want to send from.',
+      'Click <strong>Create SMTP credentials</strong> &mdash; this creates a dedicated IAM user.',
+      'Download the generated <strong>SMTP username</strong> and <strong>password</strong> (shown only once).',
+      'Make sure the host below matches your chosen region (e.g. <code>email-smtp.us-east-1.amazonaws.com</code>), and that your sending domain/email is verified in SES first.',
+    ],
+    link: { url: 'https://console.aws.amazon.com/ses/home#/smtp', label: 'Open Amazon SES SMTP settings' },
+  },
+  mailgun: {
+    title: 'Getting your Mailgun SMTP credentials',
+    steps: [
+      'Log in to Mailgun and open <strong>Sending &rarr; Domain settings &rarr; SMTP credentials</strong> for your domain.',
+      'Copy the default login (looks like <code>postmaster@yourdomain.com</code>) or add a new SMTP user.',
+      'Reset/copy the password &mdash; Mailgun only shows it once when created.',
+    ],
+    link: { url: 'https://app.mailgun.com/mg/sending/domains', label: 'Open Mailgun domain settings' },
+  },
+  sendgrid: {
+    title: 'Getting your SendGrid SMTP credentials',
+    steps: [
+      'Log in to SendGrid and open <strong>Settings &rarr; API Keys &rarr; Create API Key</strong> (Full Access or Mail Send).',
+      '<strong>Username</strong> is literally the word <code>apikey</code>.',
+      '<strong>Password</strong> is the API key you just generated (starts with <code>SG.</code>) &mdash; copy it now, it\'s shown only once.',
+    ],
+    link: { url: 'https://app.sendgrid.com/settings/api_keys', label: 'Open SendGrid API Keys' },
+  },
+  custom: {
+    title: 'Getting your SMTP credentials',
+    steps: [
+      'Ask your email host/provider for their <strong>SMTP hostname</strong>, <strong>port</strong> and <strong>encryption type</strong> (commonly TLS on 587, or SSL on 465).',
+      'Use the mailbox\'s regular <strong>username</strong> and <strong>password</strong> (or an app-specific password if 2-factor authentication is on).',
+      '<strong>From email</strong> should match (or be allowed to send as) the mailbox you\'re authenticating with, or many providers will reject or flag the message.',
+    ],
+  },
+};
+
+function renderProviderGuide(provider){
+  const g = PROVIDER_GUIDES[provider] || PROVIDER_GUIDES.custom;
+  const steps = g.steps.map(s => '<li>' + s + '</li>').join('');
+  const link = g.link ? '<a href="' + g.link.url + '" target="_blank" rel="noopener" class="small fw-semibold">' + g.link.label + ' <i class="bi bi-box-arrow-up-right"></i></a>' : '';
+  document.getElementById('providerGuide').innerHTML =
+    '<div class="alert alert-info mb-0">' +
+      '<div class="fw-semibold mb-1"><i class="bi bi-signpost-2"></i> ' + g.title + '</div>' +
+      '<ol class="mb-2 ps-3 small">' + steps + '</ol>' +
+      link +
+    '</div>';
+}
+
 function resetSmtpForm(){
   document.getElementById('smtpModalTitle').textContent='Add SMTP account';
   document.querySelector('#smtpModal form').reset();
   document.getElementById('smtp_id').value=''; document.getElementById('pwHint').textContent=''; document.getElementById('password').required=true;
   document.getElementById('testResult').innerHTML='';
   applyPreset(PRESETS, document.getElementById('provider').value, 'sm_');
+  renderProviderGuide(document.getElementById('provider').value);
 }
 
 document.getElementById('btnTestConn')?.addEventListener('click', function () {
@@ -274,6 +357,7 @@ function editSmtp(a){
   document.getElementById('dailyLimitHint').textContent = warmup_enabled.checked ? '(target — starts low, ramps up daily)' : '';
   password.value=''; password.required=false; document.getElementById('pwHint').textContent='(leave blank to keep current)';
   document.getElementById('testResult').innerHTML='';
+  renderProviderGuide(a.provider);
   new bootstrap.Modal('#smtpModal').show();
 }
 function resetGroupForm(){ group_form_id.value=''; group_name.value=''; rotation_mode.value='round_robin'; }

@@ -39,6 +39,7 @@ $router->add('logout',   'AuthController', 'logout');
 $router->add('forgot',   'AuthController', 'forgot');
 $router->add('reset',    'AuthController', 'reset');
 $router->add('verify',   'AuthController', 'verify');
+$router->add('verify/resend', 'AuthController', 'resendVerify');
 $router->add('auth/google',          'AuthController', 'googleStart');
 $router->add('auth/google/callback', 'AuthController', 'googleCallback');
 
@@ -192,6 +193,9 @@ $router->add('admin/ses',              'AdminController', 'ses');
 $router->add('admin/ses/store',        'AdminController', 'storeSes');
 $router->add('admin/ses/disconnect',   'AdminController', 'disconnectSes');
 $router->add('admin/ses/auto-upgrade', 'AdminController', 'storeAutoUpgrade');
+$router->add('admin/mail',             'AdminController', 'mail');
+$router->add('admin/mail/store',       'AdminController', 'storeMail');
+$router->add('admin/mail/test',        'AdminController', 'testMail');
 $router->add('admin/deliverability', 'AdminController', 'deliverability');
 $router->add('admin/suppression',        'AdminController', 'suppression');
 $router->add('admin/suppression/add',    'AdminController', 'addSuppression');

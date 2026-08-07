@@ -16,10 +16,36 @@ final class AdminController extends BaseController
     public function users(): void
     {
         $this->requireAdmin();
+
+        // One aggregate query per metric (not per-tenant) to keep this list
+        // page cheap regardless of how many workspaces exist.
+        $sentByUser      = self::countsByUser("SELECT user_id, COUNT(*) c FROM email_queue WHERE status = 'sent' GROUP BY user_id");
+        $campaignsByUser = self::countsByUser('SELECT user_id, COUNT(*) c FROM campaigns GROUP BY user_id');
+        $contactsByUser  = self::countsByUser('SELECT user_id, COUNT(*) c FROM contacts GROUP BY user_id');
+
+        $users = User::all();
+        foreach ($users as &$u) {
+            $id = (int) $u['id'];
+            $u['sent_total']     = $sentByUser[$id] ?? 0;
+            $u['campaign_total'] = $campaignsByUser[$id] ?? 0;
+            $u['contact_total']  = $contactsByUser[$id] ?? 0;
+        }
+        unset($u);
+
         $this->render('admin/users', [
-            'users' => User::all(),
+            'users' => $users,
             'plans' => Plan::all(),
         ], 'Manage Users');
+    }
+
+    /** @return array<int,int> user_id => count */
+    private static function countsByUser(string $sql): array
+    {
+        $counts = [];
+        foreach (db()->query($sql) as $row) {
+            $counts[(int) $row['user_id']] = (int) $row['c'];
+        }
+        return $counts;
     }
 
     /** Full drill-down on one tenant: profile, sending setup, activity, deliverability. */
@@ -357,6 +383,99 @@ final class AdminController extends BaseController
             flash('success', 'Amazon SES disconnected. Domain-based campaigns will stop sending for every tenant until you reconnect.');
         }
         $this->back('admin/ses');
+    }
+
+    // ---- System email (verification links, password resets, invites) ----
+
+    /**
+     * Transactional mail (verification, password reset, team invites) has no
+     * dedicated credentials of its own by default — Mailer::sendSystem() falls
+     * back to borrowing whichever tenant SMTP account happens to have the
+     * lowest priority. That's fragile (breaks silently if that tenant disables
+     * or edits their account) so admins can set dedicated platform credentials
+     * here instead; when enabled, sendSystem() always prefers this account.
+     */
+    public function mail(): void
+    {
+        $this->requireAdmin();
+        $this->render('admin/mail', [
+            'enabled'    => Setting::get('sys_smtp_enabled', '0') === '1',
+            'host'       => Setting::get('sys_smtp_host', ''),
+            'port'       => (int) (Setting::get('sys_smtp_port', '587') ?: 587),
+            'encryption' => Setting::get('sys_smtp_encryption', 'tls') ?: 'tls',
+            'username'   => Setting::get('sys_smtp_username', ''),
+            'hasPassword'=> Setting::get('sys_smtp_password', '') !== '',
+            'fromEmail'  => Setting::get('sys_smtp_from_email', ''),
+            'fromName'   => Setting::get('sys_smtp_from_name', ''),
+        ], 'System Email');
+    }
+
+    public function storeMail(): void
+    {
+        $this->requireAdmin();
+        csrf_guard();
+
+        $host      = str_input('host');
+        $username  = str_input('username');
+        $fromEmail = str_input('from_email');
+
+        if ($host === '' || $username === '' || !filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) {
+            flash('error', 'Host, username and a valid From email are required.');
+            $this->back('admin/mail');
+        }
+
+        Setting::set('sys_smtp_enabled', input('sys_smtp_enabled') ? '1' : '0');
+        Setting::set('sys_smtp_host', $host);
+        Setting::set('sys_smtp_port', (string) max(1, int_input('port', 587)));
+        Setting::set('sys_smtp_encryption', in_array(str_input('encryption'), ['tls', 'ssl', 'none'], true) ? str_input('encryption') : 'tls');
+        Setting::set('sys_smtp_username', $username);
+        Setting::set('sys_smtp_from_email', $fromEmail);
+        Setting::set('sys_smtp_from_name', str_input('from_name') ?: APP_NAME);
+
+        // Only overwrite the stored password when a new one is supplied.
+        $pass = (string) input('password', '');
+        if ($pass !== '') {
+            Setting::set('sys_smtp_password', Crypto::encrypt($pass));
+        }
+
+        flash('success', 'System email settings saved.');
+        $this->back('admin/mail');
+    }
+
+    /** Test the currently-typed form credentials (not necessarily saved yet) via a live send. */
+    public function testMail(): void
+    {
+        $this->requireAdmin();
+        csrf_guard();
+
+        $host = str_input('host');
+        $port = int_input('port', 587);
+        $enc  = in_array(str_input('encryption'), ['tls', 'ssl', 'none'], true) ? str_input('encryption') : 'tls';
+        $user = str_input('username');
+        $pass = (string) input('password', '');
+
+        // Blank password in the test call -> reuse the already-saved one.
+        if ($pass === '') {
+            $pass = Crypto::decrypt(Setting::get('sys_smtp_password', '') ?: '');
+        }
+
+        if ($host === '' || $user === '' || $pass === '') {
+            json_response(['ok' => false, 'error' => 'Host, username and password are required to test.']);
+        }
+
+        $fromEmail = str_input('from_email') ?: $user;
+        $fromName  = str_input('from_name') ?: APP_NAME;
+        $to        = $this->user['email'];
+
+        $mailer = new SmtpMailer($host, $port, $enc, $user, $pass);
+        $ok = $mailer->send(
+            ['email' => $fromEmail, 'name' => $fromName],
+            [$to],
+            'System email test - ' . APP_NAME,
+            '<p>✅ These credentials work. Transactional email (verification links, password resets, team invites) will send through this account.</p>'
+        );
+
+        json_response(['ok' => $ok, 'error' => $ok ? '' : $mailer->lastError(), 'to' => $to]);
     }
 
     // ---- Branding (free-plan email footer) ---------------------------
