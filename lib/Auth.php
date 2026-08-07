@@ -10,8 +10,8 @@ final class Auth
     public static function attempt(string $email, string $password): bool
     {
         $user = User::findByEmail($email);
-        if ($user === null || (int) $user['status'] !== 1) {
-            return false;
+        if ($user === null || (int) $user['status'] !== 1 || $user['password'] === null) {
+            return false; // null password = Google-only account, no password to check
         }
         if (!password_verify($password, $user['password'])) {
             return false;

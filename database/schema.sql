@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS `plans` (
   `name`            VARCHAR(100)    NOT NULL,
   `tagline`         VARCHAR(160)    DEFAULT NULL,            -- card subtitle
   `slug`            VARCHAR(100)    NOT NULL,
-  `price_monthly`   DECIMAL(10,2)   NOT NULL DEFAULT 0.00,
+  `price_monthly`   DECIMAL(10,2)   NOT NULL DEFAULT 0.00,   -- legacy, unused by new code (kept for old rows)
+  `price_smtp`      DECIMAL(10,2)   NOT NULL DEFAULT 0.00,   -- price for BYO-SMTP accounts (platform bears no sending cost)
+  `price_domain`    DECIMAL(10,2)   NOT NULL DEFAULT 0.00,   -- price for Amazon SES / domain-based sending accounts
   `price_period`    VARCHAR(10)     NOT NULL DEFAULT 'month',-- shown after the price (month / year)
   `billed_note`     VARCHAR(120)    DEFAULT NULL,            -- e.g. "$36 billed annually"
   `cta_label`       VARCHAR(60)     NOT NULL DEFAULT 'Subscribe',
@@ -38,14 +40,24 @@ CREATE TABLE IF NOT EXISTS `plans` (
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `users` (
   `id`             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `owner_id`       BIGINT UNSIGNED DEFAULT NULL,  -- NULL = tenant account; set = team-member login under that owner's account
   `name`           VARCHAR(150)    NOT NULL,
   `email`          VARCHAR(190)    NOT NULL,
-  `password`       VARCHAR(255)    NOT NULL,
+  `password`       VARCHAR(255)    DEFAULT NULL,  -- NULL for Google-only accounts
+  `google_id`      VARCHAR(64)     DEFAULT NULL,
   `company`        VARCHAR(190)    DEFAULT NULL,
   `phone`          VARCHAR(60)     DEFAULT NULL,
   `role`           ENUM('admin','user') NOT NULL DEFAULT 'user',
+  `team_role`      ENUM('owner','admin','member') NOT NULL DEFAULT 'owner', -- tenant-level permission, distinct from `role` (platform super-admin)
+  `sending_mode`   ENUM('smtp','domain') NOT NULL DEFAULT 'smtp', -- BYO-SMTP vs platform Amazon SES (different pricing)
   `org_address`    VARCHAR(255)    DEFAULT NULL,   -- physical postal address (email footer / CAN-SPAM)
   `org_website`    VARCHAR(190)    DEFAULT NULL,
+  `city`           VARCHAR(120)    DEFAULT NULL,
+  `state`          VARCHAR(120)    DEFAULT NULL,
+  `zip`            VARCHAR(20)     DEFAULT NULL,
+  `country`        VARCHAR(80)     DEFAULT NULL,
+  `onboarding_data`         JSON     DEFAULT NULL,  -- signup survey answers (subscriber count, use case, referral...)
+  `onboarding_completed_at` DATETIME DEFAULT NULL,  -- NULL = new account still needs the onboarding wizard
   `plan_id`        BIGINT UNSIGNED DEFAULT NULL,
   `plan_expires_at` DATETIME       NULL DEFAULT NULL,
   `theme`          ENUM('light','dark') NOT NULL DEFAULT 'dark',
@@ -65,8 +77,30 @@ CREATE TABLE IF NOT EXISTS `users` (
   `updated_at`     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_users_email` (`email`),
+  UNIQUE KEY `uq_users_google` (`google_id`),
   KEY `idx_users_plan` (`plan_id`),
-  CONSTRAINT `fk_users_plan` FOREIGN KEY (`plan_id`) REFERENCES `plans`(`id`) ON DELETE SET NULL
+  KEY `idx_users_owner` (`owner_id`),
+  CONSTRAINT `fk_users_plan` FOREIGN KEY (`plan_id`) REFERENCES `plans`(`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_users_owner` FOREIGN KEY (`owner_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
+--  team_invites  (pending invitations to join a tenant's account)
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `team_invites` (
+  `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `owner_id`    BIGINT UNSIGNED NOT NULL,
+  `email`       VARCHAR(190)    NOT NULL,
+  `team_role`   ENUM('admin','member') NOT NULL DEFAULT 'member',
+  `token`       VARCHAR(64)     NOT NULL,
+  `invited_by`  BIGINT UNSIGNED NOT NULL,
+  `accepted_at` DATETIME        NULL,
+  `expires_at`  DATETIME        NOT NULL,
+  `created_at`  TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_team_invites_token` (`token`),
+  KEY `idx_team_invites_owner` (`owner_id`),
+  CONSTRAINT `fk_team_invites_owner` FOREIGN KEY (`owner_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -91,6 +125,7 @@ CREATE TABLE IF NOT EXISTS `smtp_accounts` (
   `id`             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_id`        BIGINT UNSIGNED NOT NULL,
   `group_id`       BIGINT UNSIGNED DEFAULT NULL,
+  `domain_id`      BIGINT UNSIGNED DEFAULT NULL,  -- optional: gate this account behind a verified sending domain
   `label`          VARCHAR(150)    NOT NULL,
   `provider`       ENUM('google_workspace','gmail','brevo','ses','mailgun','sendgrid','custom') NOT NULL DEFAULT 'custom',
   `host`           VARCHAR(190)    NOT NULL,
@@ -102,19 +137,113 @@ CREATE TABLE IF NOT EXISTS `smtp_accounts` (
   `from_name`      VARCHAR(150)    NOT NULL,
   `priority`       INT             NOT NULL DEFAULT 10,  -- lower = higher priority
   `daily_limit`    INT             NOT NULL DEFAULT 300,
+  `warmup_enabled`      TINYINT(1) NOT NULL DEFAULT 0,     -- daily_limit ramps up automatically toward warmup_target_limit
+  `warmup_target_limit` INT UNSIGNED DEFAULT NULL,
+  `warmup_day`          INT UNSIGNED NOT NULL DEFAULT 0,
+  `warmup_last_step`    DATE DEFAULT NULL,                 -- guards against advancing twice in one calendar day
   `sent_today`     INT             NOT NULL DEFAULT 0,
   `sent_total`     BIGINT          NOT NULL DEFAULT 0,
   `fail_total`     BIGINT          NOT NULL DEFAULT 0,
   `last_reset`     DATE            DEFAULT NULL,
   `last_status`    ENUM('unknown','verified','failed') NOT NULL DEFAULT 'unknown',
   `last_checked`   DATETIME        DEFAULT NULL,
+  `webhook_token`  VARCHAR(64)     DEFAULT NULL,  -- identifies this account to /public/webhooks/*.php
+  `auto_paused_at` DATETIME        DEFAULT NULL,  -- set when reputation auto-throttle disables the account
+  `pause_reason`   VARCHAR(255)    DEFAULT NULL,
   `is_enabled`     TINYINT(1)      NOT NULL DEFAULT 1,
   `created_at`     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_smtp_user` (`user_id`),
   KEY `idx_smtp_group` (`group_id`),
-  CONSTRAINT `fk_smtp_user`  FOREIGN KEY (`user_id`)  REFERENCES `users`(`id`)       ON DELETE CASCADE,
-  CONSTRAINT `fk_smtp_group` FOREIGN KEY (`group_id`) REFERENCES `smtp_groups`(`id`) ON DELETE SET NULL
+  KEY `idx_smtp_domain` (`domain_id`),
+  UNIQUE KEY `uq_smtp_webhook_token` (`webhook_token`),
+  CONSTRAINT `fk_smtp_user`   FOREIGN KEY (`user_id`)   REFERENCES `users`(`id`)       ON DELETE CASCADE,
+  CONSTRAINT `fk_smtp_group`  FOREIGN KEY (`group_id`)  REFERENCES `smtp_groups`(`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_smtp_domain` FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`)     ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
+--  domains  (SPF/DKIM/DMARC sending-domain authentication)
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `domains` (
+  `id`               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id`          BIGINT UNSIGNED NOT NULL,
+  `domain`           VARCHAR(190)    NOT NULL,
+  `dkim_selector`    VARCHAR(60)     NOT NULL,
+  `dkim_private_key` TEXT            NOT NULL,   -- encrypted at rest (Crypto)
+  `dkim_public_key`  TEXT            NOT NULL,   -- raw base64, for the DNS TXT record
+  `spf_verified`     TINYINT(1)      NOT NULL DEFAULT 0,
+  `dkim_verified`    TINYINT(1)      NOT NULL DEFAULT 0,
+  `dmarc_verified`   TINYINT(1)      NOT NULL DEFAULT 0,
+  `is_verified`      TINYINT(1)      NOT NULL DEFAULT 0,
+  `last_checked_at`  DATETIME        DEFAULT NULL,
+  `created_at`       TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_domains_user_domain` (`user_id`,`domain`),
+  CONSTRAINT `fk_domains_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Platform-level Amazon SES API connection, configured once by the
+-- super-admin (not per tenant) — every verified Sending Domain across every
+-- tenant sends through this single connection, matching how Brevo/Mailchimp
+-- own their own sending infrastructure. Singleton table (at most one row);
+-- `user_id` just records which admin last configured it.
+CREATE TABLE IF NOT EXISTS `ses_connections` (
+  `id`           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id`      BIGINT UNSIGNED DEFAULT NULL,
+  `access_key`   VARCHAR(255)    NOT NULL,        -- encrypted at rest (Crypto)
+  `secret_key`   TEXT            NOT NULL,        -- encrypted at rest (Crypto)
+  `region`       VARCHAR(30)     NOT NULL DEFAULT 'us-east-1',
+  `webhook_token` VARCHAR(64)    DEFAULT NULL,     -- authenticates the platform-wide SES/SNS bounce-complaint endpoint
+  `verified_at`  DATETIME        DEFAULT NULL,
+  `last_error`   VARCHAR(255)    DEFAULT NULL,
+  `created_at`   TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ses_conn_webhook_token` (`webhook_token`),
+  CONSTRAINT `fk_ses_admin` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Platform-wide suppression list: a hard bounce or complaint from ANY tenant
+-- lands here automatically (on top of that tenant's own suppression list),
+-- protecting the shared SES sender reputation from any one tenant's bad list.
+CREATE TABLE IF NOT EXISTS `global_suppressions` (
+  `id`             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `email`          VARCHAR(190)    NOT NULL,
+  `reason`         VARCHAR(255)    DEFAULT NULL,
+  `source_user_id` BIGINT UNSIGNED DEFAULT NULL,
+  `created_at`     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_global_suppress_email` (`email`),
+  CONSTRAINT `fk_global_suppress_user` FOREIGN KEY (`source_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Saved "From" sender identities (name + email on a verified domain) and
+-- saved Reply-To addresses, so campaigns can pick from a short list.
+CREATE TABLE IF NOT EXISTS `senders` (
+  `id`         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id`    BIGINT UNSIGNED NOT NULL,
+  `domain_id`  BIGINT UNSIGNED NOT NULL,
+  `name`       VARCHAR(150)    NOT NULL,
+  `email`      VARCHAR(190)    NOT NULL,
+  `is_default` TINYINT(1)      NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_sender_user_email` (`user_id`,`email`),
+  KEY `idx_sender_domain` (`domain_id`),
+  CONSTRAINT `fk_sender_user`   FOREIGN KEY (`user_id`)   REFERENCES `users`(`id`)   ON DELETE CASCADE,
+  CONSTRAINT `fk_sender_domain` FOREIGN KEY (`domain_id`) REFERENCES `domains`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `reply_ids` (
+  `id`         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id`    BIGINT UNSIGNED NOT NULL,
+  `email`      VARCHAR(190)    NOT NULL,
+  `label`      VARCHAR(150)    DEFAULT NULL,
+  `is_default` TINYINT(1)      NOT NULL DEFAULT 0,
+  `created_at` TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_reply_user_email` (`user_id`,`email`),
+  CONSTRAINT `fk_reply_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -215,10 +344,20 @@ CREATE TABLE IF NOT EXISTS `campaigns` (
   `sheet_url`      VARCHAR(500)    DEFAULT NULL,   -- published Google Sheet (CSV) when source_type='sheet'
   `sector`         VARCHAR(120)    DEFAULT NULL,   -- optional sector/segment target
   `location`       VARCHAR(120)    DEFAULT NULL,   -- optional location/region target
-  `smtp_group_id`  BIGINT UNSIGNED DEFAULT NULL,
-  `smtp_id`        BIGINT UNSIGNED DEFAULT NULL,   -- single-SMTP mode
+  `smtp_group_id`  BIGINT UNSIGNED DEFAULT NULL,   -- legacy SMTP-rotation mode
+  `smtp_id`        BIGINT UNSIGNED DEFAULT NULL,   -- legacy single-SMTP mode
+  `domain_id`      BIGINT UNSIGNED DEFAULT NULL,   -- Sending Domain (sends via the account's SES connection)
+  `from_name`      VARCHAR(150)    DEFAULT NULL,
+  `from_email`     VARCHAR(190)    DEFAULT NULL,   -- must be on `domain_id`'s domain
+  `reply_to`       VARCHAR(190)    DEFAULT NULL,
   `template_id`    BIGINT UNSIGNED DEFAULT NULL,
   `subject`        VARCHAR(255)    DEFAULT NULL,
+  `ab_subject_b`   VARCHAR(255)    DEFAULT NULL,  -- subject-line A/B test, variant B (subject = variant A)
+  `ab_test_pct`    TINYINT UNSIGNED DEFAULT NULL, -- % of recipients split across A/B before picking a winner
+  `ab_test_hours`  TINYINT UNSIGNED DEFAULT NULL, -- how long to wait before deciding the winner
+  `ab_started_at`  DATETIME        DEFAULT NULL,
+  `ab_winner`      ENUM('a','b')   DEFAULT NULL,
+  `ab_decided_at`  DATETIME        DEFAULT NULL,
   `body_html`      MEDIUMTEXT      DEFAULT NULL,
   `status`         ENUM('draft','scheduled','running','paused','completed','cancelled') NOT NULL DEFAULT 'draft',
   `scheduled_at`   DATETIME        DEFAULT NULL,
@@ -233,11 +372,13 @@ CREATE TABLE IF NOT EXISTS `campaigns` (
   PRIMARY KEY (`id`),
   KEY `idx_camp_user` (`user_id`),
   KEY `idx_camp_status` (`status`),
-  CONSTRAINT `fk_camp_user`  FOREIGN KEY (`user_id`)       REFERENCES `users`(`id`)         ON DELETE CASCADE,
-  CONSTRAINT `fk_camp_list`  FOREIGN KEY (`list_id`)       REFERENCES `contact_lists`(`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_camp_grp`   FOREIGN KEY (`smtp_group_id`) REFERENCES `smtp_groups`(`id`)   ON DELETE SET NULL,
-  CONSTRAINT `fk_camp_smtp`  FOREIGN KEY (`smtp_id`)       REFERENCES `smtp_accounts`(`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_camp_tpl`   FOREIGN KEY (`template_id`)   REFERENCES `templates`(`id`)     ON DELETE SET NULL
+  KEY `idx_camp_domain` (`domain_id`),
+  CONSTRAINT `fk_camp_user`   FOREIGN KEY (`user_id`)       REFERENCES `users`(`id`)         ON DELETE CASCADE,
+  CONSTRAINT `fk_camp_list`   FOREIGN KEY (`list_id`)       REFERENCES `contact_lists`(`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_camp_grp`    FOREIGN KEY (`smtp_group_id`) REFERENCES `smtp_groups`(`id`)   ON DELETE SET NULL,
+  CONSTRAINT `fk_camp_smtp`   FOREIGN KEY (`smtp_id`)       REFERENCES `smtp_accounts`(`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_camp_domain` FOREIGN KEY (`domain_id`)     REFERENCES `domains`(`id`)       ON DELETE SET NULL,
+  CONSTRAINT `fk_camp_tpl`    FOREIGN KEY (`template_id`)   REFERENCES `templates`(`id`)     ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
@@ -290,10 +431,12 @@ CREATE TABLE IF NOT EXISTS `email_queue` (
   `step`           INT             NOT NULL DEFAULT 0,
   `email`          VARCHAR(190)    NOT NULL,
   `subject`        VARCHAR(255)    NOT NULL,
+  `ab_variant`     ENUM('a','b','holdout') DEFAULT NULL, -- 'holdout' rows are excluded from sending until AbTestEngine decides a winner
   `body_html`      MEDIUMTEXT      NOT NULL,
   `status`         ENUM('queued','sending','sent','failed','skipped') NOT NULL DEFAULT 'queued',
   `attempts`       INT             NOT NULL DEFAULT 0,
   `smtp_id`        BIGINT UNSIGNED DEFAULT NULL,
+  `ses_message_id` VARCHAR(100)    DEFAULT NULL,   -- SES MessageId, matched back to bounce/complaint SNS notifications
   `error`          VARCHAR(500)    DEFAULT NULL,
   `tracking_id`    VARCHAR(64)     NOT NULL,
   `send_after`     DATETIME        DEFAULT NULL,
@@ -301,7 +444,9 @@ CREATE TABLE IF NOT EXISTS `email_queue` (
   `created_at`     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_queue_tracking` (`tracking_id`),
+  UNIQUE KEY `uq_queue_ses_msg` (`ses_message_id`),
   KEY `idx_queue_status` (`status`,`send_after`),
+  KEY `idx_queue_ab_variant` (`ab_variant`),
   KEY `idx_queue_campaign` (`campaign_id`),
   KEY `idx_queue_contact` (`contact_id`),
   CONSTRAINT `fk_queue_camp`    FOREIGN KEY (`campaign_id`) REFERENCES `campaigns`(`id`) ON DELETE CASCADE,
@@ -319,7 +464,8 @@ CREATE TABLE IF NOT EXISTS `email_logs` (
   `contact_id`     BIGINT UNSIGNED DEFAULT NULL,
   `smtp_id`        BIGINT UNSIGNED DEFAULT NULL,
   `email`          VARCHAR(190)    NOT NULL,
-  `event`          ENUM('sent','failed','bounced') NOT NULL,
+  `event`          ENUM('sent','failed','bounced','complained') NOT NULL,
+  `bounce_type`    ENUM('hard','soft') DEFAULT NULL,
   `message`        VARCHAR(500)    DEFAULT NULL,
   `created_at`     TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -507,6 +653,24 @@ CREATE TABLE IF NOT EXISTS `payments` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
+--  api_keys  (tenant-facing REST API)
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `api_keys` (
+  `id`           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id`      BIGINT UNSIGNED NOT NULL,
+  `label`        VARCHAR(150)    NOT NULL,
+  `key_prefix`   VARCHAR(12)     NOT NULL,
+  `key_hash`     CHAR(64)        NOT NULL,
+  `created_by`   BIGINT UNSIGNED NOT NULL,
+  `last_used_at` DATETIME        NULL,
+  `created_at`   TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_api_keys_hash` (`key_hash`),
+  KEY `idx_api_keys_user` (`user_id`),
+  CONSTRAINT `fk_api_keys_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
 --  app_settings  (admin-configurable global key/value settings)
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `app_settings` (
@@ -544,16 +708,16 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- =====================================================================
 
 INSERT INTO `plans`
-  (`name`,`tagline`,`slug`,`price_monthly`,`price_period`,`cta_label`,`features`,`is_featured`,`sort_order`,`max_contacts`,`max_campaigns`,`max_smtp`,`monthly_emails`) VALUES
-  ('Starter','For getting started','starter',0.00,'month','Get started',
-   'All basic features included\nOpen, click & response tracking\nUnsubscribe & bounce tracking\n-Scheduling\nNo branded footer\nUp to 5,000 emails / month\n1 user\nBest effort support',
-   0,10,1000,10,1,5000),
-  ('Professional','For growing senders','professional',29.00,'month','Subscribe',
+  (`name`,`tagline`,`slug`,`price_monthly`,`price_smtp`,`price_domain`,`price_period`,`cta_label`,`features`,`is_featured`,`sort_order`,`max_contacts`,`max_campaigns`,`max_smtp`,`monthly_emails`) VALUES
+  ('Starter','For getting started','starter',0.00,0.00,0.00,'month','Get started',
+   'All basic features included\nOpen, click & response tracking\nUnsubscribe & bounce tracking\n-Scheduling\n"Powered by" branded footer\nUp to 1,000 emails / month\n1 user\nBest effort support',
+   0,10,1000,10,1,1000),
+  ('Growth','For steady senders','growth',1999.00,999.00,1999.00,'month','Subscribe',
+   'All basic features included\nOpen, click & response tracking\nUnsubscribe & bounce tracking\nScheduling\nNo branded footer\nUp to 50,000 emails / month\n1 user\nPriority support',
+   1,20,12000,50,3,50000),
+  ('Professional','For growing senders','professional',2999.00,1499.00,2999.00,'month','Subscribe',
    'All basic features included\nOpen, click & response tracking\nUnsubscribe & bounce tracking\nScheduling\nNo branded footer\nUp to 100,000 emails / month\n1 user\nPriority support',
-   1,20,25000,100,5,100000),
-  ('Agency','For agencies & teams','agency',99.00,'month','Subscribe',
-   'All basic features included\nOpen, click & response tracking\nUnsubscribe & bounce tracking\nScheduling\nNo branded footer\nUnlimited emails / month\nUnlimited users\nPriority support',
-   0,30,-1,-1,50,1000000)
+   0,30,25000,100,5,100000)
 ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
 
 -- Default global settings (admin-editable: free-plan email branding + site identity)
@@ -572,9 +736,9 @@ ON DUPLICATE KEY UPDATE `k` = `k`;
 
 -- Default admin user  (password: Admin@123  -> change after first login)
 -- Hash generated with password_hash('Admin@123', PASSWORD_DEFAULT)
-INSERT INTO `users` (`name`,`email`,`password`,`company`,`role`,`is_verified`,`plan_id`)
+INSERT INTO `users` (`name`,`email`,`password`,`company`,`role`,`is_verified`,`plan_id`,`onboarding_completed_at`)
 VALUES ('Administrator','admin@eventogen.com',
         '$2y$12$vo0HcdH7Vd.RQoG/srY/Be750V33vGnA65KiIpFFdZtevHIrr1hRW',
         'Eventogen','admin',1,
-        (SELECT id FROM plans WHERE slug='agency' LIMIT 1))
+        (SELECT id FROM plans WHERE slug='agency' LIMIT 1), NOW())
 ON DUPLICATE KEY UPDATE `email` = `email`;

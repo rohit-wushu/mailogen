@@ -33,28 +33,18 @@ final class DashboardController extends BaseController
             'recentCampaigns' => $recentCampaigns,
             'topCampaign'     => $top,
             'smtpAccounts'    => $smtpAccounts,
-            'onboarding'      => $this->onboarding(),
+            'onboarding'      => Stats::onboardingProgress($this->user),
+            'greeting'        => self::timeOfDayGreeting(),
+            'firstName'       => explode(' ', trim((string) ($this->user['name'] ?? 'there')))[0] ?: 'there',
         ], 'Dashboard');
     }
 
-    /** First-run setup checklist (hidden once every step is done). */
-    private function onboarding(): array
+    private static function timeOfDayGreeting(): string
     {
-        $uid  = $this->uid();
-        $sent = (int) db_one("SELECT COUNT(*) FROM email_logs WHERE user_id = ? AND event = 'sent'", [$uid]);
-        $steps = [
-            ['done' => (int) db_one('SELECT COUNT(*) FROM smtp_accounts WHERE user_id = ?', [$uid]) > 0,
-             'title' => 'Connect a sending account', 'desc' => 'Add your SMTP (Gmail, Brevo, SES…).', 'url' => 'smtp', 'icon' => 'hdd-network'],
-            ['done' => (int) db_one('SELECT COUNT(*) FROM contacts WHERE user_id = ?', [$uid]) > 0,
-             'title' => 'Add contacts', 'desc' => 'Import a CSV or add them manually.', 'url' => 'contacts/import', 'icon' => 'people'],
-            ['done' => trim((string) ($this->user['org_address'] ?? '')) !== '',
-             'title' => 'Set your mailing address', 'desc' => 'Required by law on every email footer.', 'url' => 'settings', 'icon' => 'geo-alt'],
-            ['done' => (int) db_one('SELECT COUNT(*) FROM campaigns WHERE user_id = ?', [$uid]) > 0,
-             'title' => 'Create a campaign', 'desc' => 'Design your first email.', 'url' => 'campaigns/edit', 'icon' => 'megaphone'],
-            ['done' => $sent > 0,
-             'title' => 'Send your first email', 'desc' => 'Launch a campaign or send a test.', 'url' => 'campaigns', 'icon' => 'send'],
-        ];
-        $doneCount = count(array_filter($steps, fn ($s) => $s['done']));
-        return ['steps' => $steps, 'done' => $doneCount, 'total' => count($steps), 'complete' => $doneCount === count($steps)];
+        $hour = (int) date('G');
+        if ($hour < 12) {
+            return 'Morning';
+        }
+        return $hour < 17 ? 'Afternoon' : 'Evening';
     }
 }

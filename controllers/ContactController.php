@@ -26,21 +26,7 @@ final class ContactController extends BaseController
         $tags     = ContactTag::withCounts($this->uid());
 
         $uid = $this->uid();
-        $one = static function (string $sql) use ($uid): int {
-            $st = db()->prepare($sql);
-            $st->execute([$uid]);
-            return (int) $st->fetchColumn();
-        };
-        $newRecent = $one("SELECT COUNT(*) FROM contacts WHERE user_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)");
-        $newPrev   = $one("SELECT COUNT(*) FROM contacts WHERE user_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 14 DAY) AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)");
-        $delta     = $newPrev > 0 ? round(($newRecent - $newPrev) / $newPrev * 100) : ($newRecent > 0 ? 100 : 0);
-
-        $cardStats = [
-            ['label' => 'Total Contacts', 'value' => Contact::countForUser($uid), 'delta' => (float) $delta, 'icon' => 'people-fill',      'grad' => 'violet'],
-            ['label' => 'Lists',          'value' => count($lists),               'delta' => 0.0,            'icon' => 'collection-fill',  'grad' => 'blue'],
-            ['label' => 'Tags',           'value' => count($tags),                'delta' => 0.0,            'icon' => 'tags-fill',        'grad' => 'orange'],
-            ['label' => 'Unsubscribed',   'value' => $one("SELECT COUNT(*) FROM contacts WHERE user_id = ? AND status = 'unsubscribed'"), 'delta' => 0.0, 'icon' => 'person-dash-fill', 'grad' => 'red'],
-        ];
+        $cardStats = Stats::contactsCards($uid);
 
         $this->render('contacts/index', [
             'contacts'    => $contacts,

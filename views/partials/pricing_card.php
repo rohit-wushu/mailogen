@@ -10,11 +10,15 @@
  * Features come from $p['features'] (one per line; "-" prefix = excluded).
  * The CSS is emitted once per request.
  */
+/** @var array $p */
 $cardFooter = $cardFooter ?? '';
 $cardBadge  = $cardBadge ?? (!empty($p['is_featured']) ? 'Most popular' : null);
 $cardHi     = $cardHi ?? !empty($p['is_featured']);
-$price      = (float) $p['price_monthly'];
+$priceSmtp  = (float) $p['price_smtp'];
+$priceDom   = (float) $p['price_domain'];
+$isFree     = $priceSmtp <= 0 && $priceDom <= 0;
 $period     = $p['price_period'] ?: 'month';
+$cur        = BILLING_CURRENCY === 'INR' ? '₹' : '$';
 $features   = Plan::featureList($p);
 ?>
 <?php if (!defined('PRICING_CSS_DONE')) { define('PRICING_CSS_DONE', 1); ?>
@@ -35,6 +39,12 @@ $features   = Plan::featureList($p);
   .pc-amount { font-size: 3.2rem; font-weight: 800; letter-spacing: -.02em; }
   .pc-period { color: var(--bs-secondary-color); font-size: 1rem; align-self: flex-end; margin-bottom: 10px; }
   .pc-free { font-size: 2.4rem; font-weight: 800; }
+  .pc-price-dual { margin-top: 18px; display: flex; flex-direction: column; gap: 8px; }
+  .pc-price-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+                  padding: 8px 12px; border-radius: 10px; background: var(--bs-tertiary-bg); }
+  .pc-price-tag { font-size: .78rem; color: var(--bs-secondary-color); font-weight: 600; }
+  .pc-price-val { font-size: 1.15rem; font-weight: 800; white-space: nowrap; }
+  .pc-price-val small { font-size: .62em; font-weight: 600; color: var(--bs-secondary-color); }
   .pc-billed { color: var(--bs-secondary-color); font-size: .88rem; margin-top: 8px; min-height: 1.1em; }
   .pc-features { list-style: none; margin: 0; padding: 24px 26px; flex: 1 1 auto; }
   .pc-feat { display: flex; align-items: flex-start; gap: 10px; padding: 7px 0; font-size: .95rem; color: var(--bs-body-color); }
@@ -50,17 +60,24 @@ $features   = Plan::featureList($p);
   <div class="pc-head">
     <h3 class="pc-name"><?= e($p['name']) ?></h3>
     <div class="pc-tagline"><?= e($p['tagline'] ?? '') ?></div>
-    <div class="pc-price">
-      <?php if ($price > 0): ?>
-        <span class="pc-cur"><?= e(BILLING_CURRENCY === 'INR' ? '₹' : '$') ?></span>
-        <span class="pc-amount"><?= number_format($price, 0) ?></span>
-        <span class="pc-period">/<?= e($period) ?></span>
-      <?php else: ?>
-        <span class="pc-cur"><?= e(BILLING_CURRENCY === 'INR' ? '₹' : '$') ?></span>
+    <?php if ($isFree): ?>
+      <div class="pc-price">
+        <span class="pc-cur"><?= e($cur) ?></span>
         <span class="pc-amount">0</span>
         <span class="pc-period">/<?= e($period) ?></span>
-      <?php endif; ?>
-    </div>
+      </div>
+    <?php else: ?>
+      <div class="pc-price-dual">
+        <div class="pc-price-row">
+          <span class="pc-price-tag">Domain (hosted by us)</span>
+          <span class="pc-price-val"><?= e($cur) ?><?= number_format($priceDom, 0) ?><small>/<?= e($period) ?></small></span>
+        </div>
+        <div class="pc-price-row">
+          <span class="pc-price-tag">SMTP (bring your own)</span>
+          <span class="pc-price-val"><?= e($cur) ?><?= number_format($priceSmtp, 0) ?><small>/<?= e($period) ?></small></span>
+        </div>
+      </div>
+    <?php endif; ?>
     <div class="pc-billed"><?= e($p['billed_note'] ?? '') ?></div>
   </div>
   <ul class="pc-features">

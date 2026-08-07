@@ -53,8 +53,24 @@
   };
 
   // ---- Sidebar toggle (mobile) ----
+  var $sidebar = $('#sidebar');
+  var $sidebarBackdrop = $('#sidebarBackdrop');
+  function closeMobileSidebar() {
+    $sidebar.removeClass('open');
+    $sidebarBackdrop.removeClass('show');
+  }
   $('#sidebarToggle').on('click', function () {
-    $('#sidebar').toggleClass('open');
+    $sidebar.toggleClass('open');
+    $sidebarBackdrop.toggleClass('show', $sidebar.hasClass('open'));
+  });
+  $sidebarBackdrop.on('click', closeMobileSidebar);
+  $(document).on('keydown', function (e) {
+    if (e.key === 'Escape') closeMobileSidebar();
+  });
+
+  // ---- Sidebar nav groups (Audience / Reports inline accordion) ----
+  $('.nav-group-toggle').on('click', function () {
+    $(this).closest('.nav-group').toggleClass('open');
   });
 
   // ---- Theme toggle (top-bar button + sidebar switch stay in sync) ----

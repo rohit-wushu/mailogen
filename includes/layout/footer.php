@@ -37,7 +37,6 @@ $__cmdk = [
   ['g' => 'Pages', 'label' => 'Campaigns',       'icon' => 'send-fill',              'url' => url('campaigns')],
   ['g' => 'Pages', 'label' => 'Templates',       'icon' => 'file-richtext-fill',     'url' => url('templates')],
   ['g' => 'Pages', 'label' => 'Automations',     'icon' => 'diagram-3-fill',         'url' => url('automations')],
-  ['g' => 'Pages', 'label' => 'SMTP Accounts',   'icon' => 'hdd-network-fill',       'url' => url('smtp')],
   ['g' => 'Pages', 'label' => 'Deliverability',  'icon' => 'shield-check',           'url' => url('deliverability')],
   ['g' => 'Pages', 'label' => 'Sent Emails',     'icon' => 'envelope-check-fill',    'url' => url('emails')],
   ['g' => 'Pages', 'label' => 'Reports',         'icon' => 'bar-chart-fill',         'url' => url('reports')],
@@ -45,10 +44,13 @@ $__cmdk = [
   ['g' => 'Pages', 'label' => 'Settings',        'icon' => 'gear-fill',              'url' => url('settings')],
   ['g' => 'Actions', 'label' => 'New campaign',  'icon' => 'plus-circle',            'url' => url('campaigns/edit')],
   ['g' => 'Actions', 'label' => 'New template',  'icon' => 'plus-circle',            'url' => url('templates/edit')],
-  ['g' => 'Actions', 'label' => 'Add SMTP account','icon' => 'plus-circle',          'url' => url('smtp')],
   ['g' => 'Actions', 'label' => 'Import contacts','icon' => 'upload',                'url' => url('contacts/import')],
   ['g' => 'Actions', 'label' => 'Verify an email','icon' => 'patch-check',           'url' => url('email-verifier')],
 ];
+if (($user['team_role'] ?? 'owner') !== 'member') {
+  $__cmdk[] = ['g' => 'Pages', 'label' => 'SMTP Accounts', 'icon' => 'hdd-network-fill', 'url' => url('smtp')];
+  $__cmdk[] = ['g' => 'Actions', 'label' => 'Add SMTP account', 'icon' => 'plus-circle', 'url' => url('smtp')];
+}
 if (Auth::isAdmin()) {
   $__cmdk[] = ['g' => 'Admin', 'label' => 'Admin Overview', 'icon' => 'pie-chart-fill',   'url' => url('admin')];
   $__cmdk[] = ['g' => 'Admin', 'label' => 'Manage Users',   'icon' => 'person-badge-fill','url' => url('admin/users')];

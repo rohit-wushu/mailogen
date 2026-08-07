@@ -1,4 +1,7 @@
-<?php /** @var array $accounts @var array $groups @var array $presets */ ?>
+<?php /** @var array $accounts @var array $groups @var array $domains @var array $rates @var array $presets */
+$domainById = [];
+foreach ($domains as $dm) { $domainById[(int) $dm['id']] = $dm; }
+?>
 <div class="page-head">
   <h2>SMTP Accounts</h2>
   <div class="d-flex gap-2">
@@ -10,27 +13,51 @@
 <div class="card mb-3">
   <div class="table-responsive">
     <table class="table table-hover align-middle mb-0">
-      <thead><tr><th>Name</th><th>Host</th><th>Username</th><th>Status</th><th>Daily Limit</th><th>Used</th><th class="text-end">Actions</th></tr></thead>
+      <thead><tr><th>Name</th><th>Host</th><th>Domain</th><th>Status</th><th>Reputation</th><th>Daily Limit</th><th>Used</th><th class="text-end">Actions</th></tr></thead>
       <tbody>
         <?php if (!$accounts): ?>
-          <tr><td colspan="7"><div class="empty-state"><i class="bi bi-hdd-network"></i><p class="mt-2">No SMTP accounts. Connect Gmail, Google Workspace, Brevo, SES, Mailgun, SendGrid or any custom SMTP.</p></div></td></tr>
+          <tr><td colspan="8"><div class="empty-state"><i class="bi bi-hdd-network"></i><p class="mt-2">No SMTP accounts. Connect Gmail, Google Workspace, Brevo, SES, Mailgun, SendGrid or any custom SMTP.</p></div></td></tr>
         <?php else: foreach ($accounts as $a):
-          $pct = (int) $a['daily_limit'] > 0 ? min(100, round((int) $a['sent_today'] / (int) $a['daily_limit'] * 100, 1)) : 0; ?>
+          $pct = (int) $a['daily_limit'] > 0 ? min(100, round((int) $a['sent_today'] / (int) $a['daily_limit'] * 100, 1)) : 0;
+          $dom = $a['domain_id'] ? ($domainById[(int) $a['domain_id']] ?? null) : null;
+          $r = $rates[(int) $a['id']] ?? ['sample' => 0, 'bounce_rate' => 0, 'complaint_rate' => 0];
+          $autoPaused = !empty($a['auto_paused_at']); ?>
           <tr>
             <td class="fw-semibold"><?= e($a['label']) ?><div class="text-muted small fw-normal"><?= e(provider_label($a['provider'])) ?></div></td>
             <td class="text-muted small"><?= e($a['host']) ?>:<?= (int) $a['port'] ?></td>
-            <td class="text-muted small"><?= e($a['username']) ?></td>
+            <td class="small">
+              <?php if ($dom): ?>
+                <?= e($dom['domain']) ?>
+                <?php if ((int) $dom['is_verified'] === 1): ?><span class="badge bg-success-subtle text-success-emphasis badge-soft">verified</span>
+                <?php else: ?><span class="badge bg-warning-subtle text-warning-emphasis badge-soft">unverified</span><?php endif; ?>
+              <?php else: ?><span class="text-muted">— not gated —</span><?php endif; ?>
+            </td>
             <td>
-              <?php if ((int) $a['is_enabled'] === 0): ?>
+              <?php if ($autoPaused): ?>
+                <span class="status-pill status-bounced" title="<?= e($a['pause_reason'] ?? '') ?>">Auto-paused</span>
+              <?php elseif ((int) $a['is_enabled'] === 0): ?>
                 <span class="status-pill status-bounced">Disabled</span>
               <?php else: ?>
                 <span class="status-pill status-active"><?= $a['last_status'] === 'failed' ? 'Error' : 'Active' ?></span>
               <?php endif; ?>
             </td>
-            <td><?= number_format((int) $a['daily_limit']) ?></td>
+            <td class="small">
+              <?php if ($r['sample'] < 25): ?><span class="text-muted">not enough data</span>
+              <?php else: ?>
+                <span class="<?= $r['bounce_rate'] > 0.05 ? 'text-danger fw-semibold' : 'text-muted' ?>">bounce <?= round($r['bounce_rate'] * 100, 1) ?>%</span><br>
+                <span class="<?= $r['complaint_rate'] > 0.001 ? 'text-danger fw-semibold' : 'text-muted' ?>">complaint <?= round($r['complaint_rate'] * 100, 2) ?>%</span>
+              <?php endif; ?>
+            </td>
+            <td>
+              <?= number_format((int) $a['daily_limit']) ?>
+              <?php if ((int) $a['warmup_enabled'] === 1): ?>
+                <br><span class="badge bg-brand-subtle text-brand badge-soft"><i class="bi bi-thermometer-half"></i> warming up — day <?= (int) $a['warmup_day'] ?>, target <?= number_format((int) $a['warmup_target_limit']) ?></span>
+              <?php endif; ?>
+            </td>
             <td><?= (int) $a['sent_today'] ?> (<?= $pct ?>%)</td>
             <td class="text-end text-nowrap">
               <button class="row-actions" data-email="<?= e($a['from_email']) ?>" onclick="smtpTest(<?= (int) $a['id'] ?>, this)" title="Test"><i class="bi bi-send"></i></button>
+              <button class="row-actions" onclick='showWebhooks(<?= (int) $a['id'] ?>, <?= js($a['webhook_token']) ?>)' title="Webhook URLs"><i class="bi bi-broadcast"></i></button>
               <button class="row-actions" onclick='editSmtp(<?= json_encode($a) ?>)' title="Edit"><i class="bi bi-pencil"></i></button>
               <form method="post" action="<?= url('smtp/toggle') ?>" class="d-inline">
                 <?= csrf_field() ?><input type="hidden" name="id" value="<?= (int) $a['id'] ?>">
@@ -122,7 +149,20 @@
             </select>
           </div>
           <div class="col-md-4"><label class="form-label">Priority</label><input type="number" class="form-control" name="priority" id="priority" value="10"></div>
-          <div class="col-md-4"><label class="form-label">Daily limit</label><input type="number" class="form-control" name="daily_limit" id="daily_limit" value="1500"></div>
+          <div class="col-md-4"><label class="form-label">Daily limit <span class="text-muted small" id="dailyLimitHint"></span></label><input type="number" class="form-control" name="daily_limit" id="daily_limit" value="1500"></div>
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" name="warmup_enabled" value="1" id="warmup_enabled" onchange="document.getElementById('dailyLimitHint').textContent = this.checked ? '(target — starts low, ramps up daily)' : ''">
+              <label class="form-check-label" for="warmup_enabled">Warm up this account <span class="text-muted small">— starts at 50/day and ramps ~50% daily toward the limit above, pausing automatically if bounce/complaint rate looks unhealthy</span></label>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Sending domain <span class="text-muted small">(optional — gates this account behind domain verification)</span></label>
+            <select class="form-select" name="domain_id" id="domain_id"><option value="">— not gated —</option>
+              <?php foreach ($domains as $dm): ?><option value="<?= (int) $dm['id'] ?>"><?= e($dm['domain']) ?> <?= (int) $dm['is_verified'] === 1 ? '(verified)' : '(unverified)' ?></option><?php endforeach; ?>
+            </select>
+            <div class="form-text">Add domains under <a href="<?= url('domains') ?>">Sending Domains</a> first.</div>
+          </div>
         </div>
         <div class="alert alert-info small mt-3 mb-0"><i class="bi bi-info-circle"></i> For Gmail / Google Workspace use an <strong>App Password</strong> (2-Step Verification required).</div>
         <div id="testResult" class="mt-3"></div>
@@ -157,6 +197,24 @@
       </div>
       <div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary">Save group</button></div>
     </form>
+  </div>
+</div>
+
+<!-- Webhook URLs modal -->
+<div class="modal fade" id="webhookModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Bounce / complaint webhook URLs</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <p class="text-muted small">Paste the matching URL into your ESP's webhook settings so bounces and spam complaints feed back into suppression and reputation tracking automatically. This token is a secret — anyone with it can report fake bounces for this account.</p>
+        <div id="webhookUrls"></div>
+        <form method="post" action="<?= url('smtp/rotate-webhook') ?>" class="mt-2" data-confirm="Rotate this account's webhook secret? You'll need to update the URL in your ESP's settings.">
+          <?= csrf_field() ?><input type="hidden" name="id" id="webhook_smtp_id">
+          <button class="btn btn-sm btn-outline-danger"><i class="bi bi-arrow-repeat"></i> Rotate secret</button>
+        </form>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Close</button></div>
+    </div>
   </div>
 </div>
 
@@ -209,11 +267,40 @@ function editSmtp(a){
   smtp_id.value=a.id; label.value=a.label; provider.value=a.provider;
   sm_host.value=a.host; sm_port.value=a.port; sm_encryption.value=a.encryption;
   username.value=a.username; from_name.value=a.from_name; from_email.value=a.from_email;
-  group_id.value=a.group_id||''; priority.value=a.priority; daily_limit.value=a.daily_limit;
+  group_id.value=a.group_id||''; priority.value=a.priority;
+  domain_id.value=a.domain_id||'';
+  warmup_enabled.checked = Number(a.warmup_enabled) === 1;
+  daily_limit.value = warmup_enabled.checked ? (a.warmup_target_limit || a.daily_limit) : a.daily_limit;
+  document.getElementById('dailyLimitHint').textContent = warmup_enabled.checked ? '(target — starts low, ramps up daily)' : '';
   password.value=''; password.required=false; document.getElementById('pwHint').textContent='(leave blank to keep current)';
   document.getElementById('testResult').innerHTML='';
   new bootstrap.Modal('#smtpModal').show();
 }
 function resetGroupForm(){ group_form_id.value=''; group_name.value=''; rotation_mode.value='round_robin'; }
 function editGroup(g){ group_form_id.value=g.id; group_name.value=g.name; rotation_mode.value=g.rotation_mode; new bootstrap.Modal('#groupModal').show(); }
+
+function showWebhooks(id, token){
+  webhook_smtp_id.value = id;
+  const base = window.APP_URL + '/webhooks/';
+  const providers = ['ses', 'mailgun', 'sendgrid', 'brevo'];
+  const labels = {ses: 'Amazon SES (SNS topic)', mailgun: 'Mailgun', sendgrid: 'SendGrid', brevo: 'Brevo'};
+  let html = '<div class="table-responsive"><table class="table table-sm"><tbody>';
+  providers.forEach((p, i) => {
+    const url = base + p + '.php?t=' + token;
+    html += '<tr><td class="fw-semibold text-nowrap">' + labels[p] + '</td>'
+      + '<td class="text-break small"><code id="wh_' + i + '">' + url + '</code></td>'
+      + '<td><button type="button" class="row-actions" onclick="copyText(\'wh_' + i + '\')"><i class="bi bi-clipboard"></i></button></td></tr>';
+  });
+  html += '</tbody></table></div>';
+  document.getElementById('webhookUrls').innerHTML = html;
+  new bootstrap.Modal('#webhookModal').show();
+}
+function copyText(id){
+  const el = document.getElementById(id);
+  navigator.clipboard.writeText(el.textContent).then(() => {
+    const original = el.textContent;
+    el.textContent = 'Copied!';
+    setTimeout(() => { el.textContent = original; }, 900);
+  });
+}
 </script>

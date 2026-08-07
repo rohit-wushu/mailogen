@@ -1,28 +1,37 @@
 <?php /** Standalone 404 for logged-out visitors (brand styled, no app chrome). */ ?>
 <!doctype html>
-<html lang="en" data-bs-theme="light">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Page not found · <?= e(Site::name()) ?></title>
   <meta name="robots" content="noindex">
   <link rel="icon" href="<?= e(Site::faviconUrl()) ?>">
+  <script>(function(){var t=localStorage.getItem('mg-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-bs-theme',t);})();</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <style>
     :root{ --brand:#6d5efc; --brand2:#8b5cf6; --brand-d:#5b4ee8; --grad:linear-gradient(135deg,#6d5efc,#8b5cf6);
-           --ink:#0a2540; --muted:#51647a; --line:#e6ebf0; --soft:#f0eefe; --ring:rgba(109,94,252,.35); }
+           --ink:#0a2540; --muted:#51647a; --line:#e6ebf0; --soft:#f0eefe; --ring:rgba(109,94,252,.35); --card-bg:#fff; }
+    html[data-bs-theme="dark"]{ --ink:#e6e9f5; --muted:#97a3c4; --line:rgba(255,255,255,.1); --soft:rgba(109,94,252,.16); --card-bg:#131a36; }
+    html[data-bs-theme="dark"] body{ background:radial-gradient(60% 60% at 88% -5%, #241d47, transparent 60%),
+                 radial-gradient(50% 50% at 0% 25%, #241a12, transparent 55%), #0a0f24; }
     *{box-sizing:border-box}
     body{ margin:0; min-height:100vh; display:flex; flex-direction:column; color:var(--ink);
       font-family:"Montserrat",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
       background:radial-gradient(60% 60% at 88% -5%, #e7e3fd, transparent 60%),
-                 radial-gradient(50% 50% at 0% 25%, #fff6df, transparent 55%), #fff; }
+                 radial-gradient(50% 50% at 0% 25%, #fff6df, transparent 55%), #fff;
+      transition:background .2s, color .2s; }
     a{text-decoration:none;color:inherit}
     .wrap{ max-width:760px; margin:0 auto; padding:0 22px; }
-    .topbar{ height:74px; display:flex; align-items:center; }
+    .topbar{ height:74px; display:flex; align-items:center; gap:12px; }
     .brand{ display:flex; align-items:center; gap:11px; font-weight:700; font-size:1.25rem; letter-spacing:-.02em; }
+    .theme-toggle{ margin-left:auto; width:42px; height:42px; border-radius:12px; border:1px solid var(--line);
+      background:var(--card-bg); color:var(--muted); display:inline-flex; align-items:center; justify-content:center;
+      font-size:1.05rem; cursor:pointer; }
+    .theme-toggle:hover{ color:var(--brand); }
     .brand .logo{ width:40px;height:40px;border-radius:12px;background:var(--grad);display:grid;place-items:center;color:#fff;font-size:1.15rem; }
     main{ flex:1; display:flex; align-items:center; padding:30px 0 60px; }
     .card-404{ width:100%; text-align:center; }
@@ -41,12 +50,12 @@
       transition:transform .15s, box-shadow .15s, background .15s, border-color .15s, color .15s; }
     .btn-grad{ background:var(--grad); color:#fff; box-shadow:0 14px 28px -12px rgba(109,94,252,.8); }
     .btn-grad:hover{ transform:translateY(-2px); box-shadow:0 18px 34px -12px rgba(109,94,252,.9); }
-    .btn-outline{ background:#fff; color:var(--ink); border-color:var(--line); }
+    .btn-outline{ background:var(--card-bg); color:var(--ink); border-color:var(--line); }
     .btn-outline:hover{ border-color:var(--brand); color:var(--brand); transform:translateY(-2px); }
 
     .links-head{ text-transform:uppercase; letter-spacing:.12em; font-size:.72rem; font-weight:700; color:#9aa3bd; margin-bottom:14px; }
     .links{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
-    .lcard{ display:flex; align-items:center; gap:11px; padding:14px 16px; border-radius:14px; background:#fff;
+    .lcard{ display:flex; align-items:center; gap:11px; padding:14px 16px; border-radius:14px; background:var(--card-bg);
       border:1px solid var(--line); color:var(--ink); transition:transform .15s, box-shadow .15s, border-color .15s; text-align:left; }
     .lcard:hover{ transform:translateY(-3px); border-color:rgba(109,94,252,.4); box-shadow:0 16px 30px -18px rgba(10,37,64,.4); }
     .lcard .ic{ width:38px;height:38px;border-radius:11px;background:var(--soft);color:var(--brand-d);display:grid;place-items:center;font-size:1.05rem;flex:0 0 38px; }
@@ -64,7 +73,10 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="wrap"><a class="brand" href="<?= url('') ?>"><?php if (Site::showMark()): $__el = Site::logoUrl(); ?><?php if ($__el): ?><img class="logo" src="<?= e($__el) ?>" alt="<?= e(Site::name()) ?>" style="object-fit:contain;background:transparent"><?php else: ?><span class="logo"><i class="bi bi-send-fill"></i></span><?php endif; ?><?php endif; ?><?php if (Site::showName()): ?><?= e(Site::name()) ?><?php endif; ?></a></div>
+    <div class="wrap" style="display:flex;align-items:center">
+      <a class="brand" href="<?= url('') ?>"><?php if (Site::showMark()): $__el = Site::logoUrl(); ?><?php if ($__el): ?><img class="logo" src="<?= e($__el) ?>" alt="<?= e(Site::name()) ?>" style="object-fit:contain;background:transparent"><?php else: ?><span class="logo"><i class="bi bi-send-fill"></i></span><?php endif; ?><?php endif; ?><?php if (Site::showName()): ?><?= e(Site::name()) ?><?php endif; ?></a>
+      <button type="button" class="theme-toggle" id="notFoundThemeToggle" title="Toggle theme" aria-label="Toggle theme"><i class="bi bi-moon-stars-fill"></i></button>
+    </div>
   </header>
 
   <main>
@@ -102,5 +114,19 @@
       </span>
     </div>
   </footer>
+  <script>
+    (function () {
+      var btn = document.getElementById('notFoundThemeToggle');
+      var icon = btn.querySelector('i');
+      function paint(t) { icon.className = t === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-stars-fill'; }
+      paint(document.documentElement.getAttribute('data-bs-theme'));
+      btn.addEventListener('click', function () {
+        var next = document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-bs-theme', next);
+        localStorage.setItem('mg-theme', next);
+        paint(next);
+      });
+    })();
+  </script>
 </body>
 </html>

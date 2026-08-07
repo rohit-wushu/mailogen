@@ -27,9 +27,16 @@ final class Mailer
         }
         $campaign = $cid ? self::$campaignCache[$cid] : null;
 
-        // Respect the global / campaign suppression list.
+        // Respect the tenant's own suppression list and the platform-wide one
+        // (hard bounces/complaints from ANY tenant — protects the shared SES
+        // sender reputation from a single tenant's bad list).
         if (Unsubscribe::isSuppressed($userId, $queue['email'], $campaign['id'] ?? null)) {
             db()->prepare("UPDATE email_queue SET status='skipped', error='unsubscribed' WHERE id = ?")
+                ->execute([(int) $queue['id']]);
+            return false;
+        }
+        if (GlobalSuppression::isSuppressed($queue['email'])) {
+            db()->prepare("UPDATE email_queue SET status='skipped', error='globally suppressed' WHERE id = ?")
                 ->execute([(int) $queue['id']]);
             return false;
         }
@@ -52,6 +59,12 @@ final class Mailer
             $org
         );
 
+        // Domain-based campaigns (Sending Domain + the account's Amazon SES
+        // connection) bypass the SMTP rotation engine entirely.
+        if ($campaign !== null && !empty($campaign['domain_id'])) {
+            return self::deliverViaDomain($queue, $campaign, $html, $inlineImages, $userId);
+        }
+
         $candidates = SmtpRotator::candidates($campaign ?? [], $userId, (int) $queue['id']);
         if ($candidates === []) {
             EmailQueue::markFailed((int) $queue['id'], 'No available SMTP account (check limits / enabled status).', false);
@@ -69,12 +82,17 @@ final class Mailer
                 SmtpAccount::plainPassword($account)
             );
 
+            $signingDomain = self::dkimDomainFor($account);
+            if ($signingDomain !== null) {
+                $mailer->withDkim($signingDomain['domain'], $signingDomain['dkim_selector'], Domain::privateKey($signingDomain));
+            }
+
             $ok = $mailer->send(
                 ['email' => $account['from_email'], 'name' => $account['from_name']],
                 [$queue['email']],
                 $queue['subject'],
                 $html,
-                self::headers($queue),
+                self::headers($queue, $campaign),
                 $inlineImages
             );
 
@@ -104,6 +122,75 @@ final class Mailer
     }
 
     /**
+     * Deliver one queued email for a domain-based campaign through the
+     * account's Amazon SES connection, DKIM-signed with the Sending
+     * Domain's own key (same signing path as the SMTP transport).
+     */
+    private static function deliverViaDomain(array $queue, array $campaign, string $html, array $inlineImages, int $userId): bool
+    {
+        $domain = Domain::find((int) $campaign['domain_id']);
+        if (!$domain || (int) $domain['user_id'] !== $userId || (int) $domain['is_verified'] !== 1) {
+            EmailQueue::markFailed((int) $queue['id'], 'Sending domain is not verified.', false);
+            self::log($queue, null, 'failed', 'Sending domain is not verified');
+            return false;
+        }
+
+        $conn = SesConnection::platform();
+        if (!$conn) {
+            EmailQueue::markFailed((int) $queue['id'], 'Amazon SES is not connected on this platform yet. Contact your administrator.', false);
+            self::log($queue, null, 'failed', 'Amazon SES is not connected');
+            return false;
+        }
+
+        $fromEmail = (string) ($campaign['from_email'] ?: ('no-reply@' . $domain['domain']));
+        $fromName  = (string) ($campaign['from_name'] ?: APP_NAME);
+
+        $mime = MimeMessage::buildSigned(
+            ['email' => $fromEmail, 'name' => $fromName],
+            [$queue['email']],
+            $queue['subject'],
+            $html,
+            self::headers($queue, $campaign),
+            $inlineImages,
+            ['domain' => $domain['domain'], 'selector' => $domain['dkim_selector'], 'privateKeyPem' => Domain::privateKey($domain)],
+            $domain['domain']
+        );
+
+        $res = Ses::sendRaw(SesConnection::credentials($conn), $mime, $fromEmail, [$queue['email']]);
+
+        if ($res['ok']) {
+            EmailQueue::markSent((int) $queue['id'], null, $res['message_id'] ?: null);
+            if ($campaign) {
+                Campaign::incrementSent((int) $campaign['id']);
+                CampaignContact::setStatus((int) $campaign['id'], (int) $queue['contact_id'], 'sent');
+            }
+            self::log($queue, null, 'sent', 'Delivered via Amazon SES (' . $domain['domain'] . ')');
+            return true;
+        }
+
+        $retry = ((int) $queue['attempts'] + 1) < MAX_ATTEMPTS;
+        EmailQueue::markFailed((int) $queue['id'], $res['error'], $retry);
+        self::log($queue, null, 'failed', $res['error']);
+        return false;
+    }
+
+    /** The verified `domains` row to sign with for this account, if any (explicit link, else by From-domain match). */
+    private static function dkimDomainFor(array $account): ?array
+    {
+        if (!empty($account['domain_id'])) {
+            $d = Domain::find((int) $account['domain_id']);
+            return ($d && (int) $d['is_verified'] === 1) ? $d : null;
+        }
+        $host = strtolower(substr((string) strrchr((string) $account['from_email'], '@'), 1));
+        if ($host === '') {
+            return null;
+        }
+        $stmt = db()->prepare('SELECT * FROM domains WHERE user_id = ? AND domain = ? AND is_verified = 1 LIMIT 1');
+        $stmt->execute([(int) $account['user_id'], $host]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /**
      * One-off send used by "Send test email" and SMTP verification.
      * Bypasses the queue.
      */
@@ -116,6 +203,10 @@ final class Mailer
             $account['username'],
             SmtpAccount::plainPassword($account)
         );
+        $signingDomain = self::dkimDomainFor($account);
+        if ($signingDomain !== null) {
+            $mailer->withDkim($signingDomain['domain'], $signingDomain['dkim_selector'], Domain::privateKey($signingDomain));
+        }
         $ok = $mailer->send(
             ['email' => $account['from_email'], 'name' => $account['from_name']],
             [$toEmail],
@@ -125,6 +216,26 @@ final class Mailer
             $inlineImages
         );
         return ['ok' => $ok, 'error' => $ok ? '' : $mailer->lastError()];
+    }
+
+    /**
+     * One-off send through Amazon SES for a domain-based campaign (used by
+     * "Send test email"). Bypasses the queue, mirrors sendNow()'s contract.
+     */
+    public static function sendNowSes(array $conn, array $domain, string $fromEmail, string $fromName, string $toEmail, string $subject, string $html, array $inlineImages = []): array
+    {
+        $mime = MimeMessage::buildSigned(
+            ['email' => $fromEmail, 'name' => $fromName],
+            [$toEmail],
+            $subject,
+            $html,
+            [],
+            $inlineImages,
+            ['domain' => $domain['domain'], 'selector' => $domain['dkim_selector'], 'privateKeyPem' => Domain::privateKey($domain)],
+            $domain['domain']
+        );
+        $res = Ses::sendRaw(SesConnection::credentials($conn), $mime, $fromEmail, [$toEmail]);
+        return ['ok' => $res['ok'], 'error' => $res['error']];
     }
 
     /**
@@ -168,14 +279,18 @@ final class Mailer
 
     // ----------------------------------------------------------------
 
-    private static function headers(array $queue): array
+    private static function headers(array $queue, ?array $campaign = null): array
     {
         $unsub = url('unsubscribe.php?t=' . $queue['tracking_id']);
-        return [
+        $headers = [
             'List-Unsubscribe'      => '<' . $unsub . '>',
             'List-Unsubscribe-Post' => 'List-Unsubscribe=One-Click',
             'X-Mailer'              => APP_NAME,
         ];
+        if (!empty($campaign['reply_to'])) {
+            $headers['Reply-To'] = $campaign['reply_to'];
+        }
+        return $headers;
     }
 
     /** Inject the open pixel, rewrite links for click tracking, add unsub footer. */

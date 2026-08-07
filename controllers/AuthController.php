@@ -7,7 +7,7 @@ final class AuthController extends BaseController
     public function login(): void
     {
         if (Auth::check()) {
-            redirect('dashboard');
+            redirect(Auth::isAdmin() ? 'admin' : 'dashboard');
         }
         if ($this->isPost()) {
             csrf_guard();
@@ -23,17 +23,20 @@ final class AuthController extends BaseController
             if (Auth::attempt($email, $pass)) {
                 RateLimiter::clear($bucket);
                 User::update(Auth::id(), ['last_login_at' => date('Y-m-d H:i:s')]);
-                redirect('dashboard');
+                redirect(Auth::isAdmin() ? 'admin' : 'dashboard');
             }
-            flash('error', 'Invalid email or password.');
+            $existing = User::findByEmail($email);
+            flash('error', ($existing && $existing['password'] === null)
+                ? 'This account uses Google Sign-In. Please continue with Google below.'
+                : 'Invalid email or password.');
         }
-        view_bare('auth/login', [], 'Sign in');
+        view_bare('auth/login', ['googleEnabled' => GoogleAuth::isConfigured()], 'Sign in');
     }
 
     public function register(): void
     {
         if (Auth::check()) {
-            redirect('dashboard');
+            redirect(Auth::isAdmin() ? 'admin' : 'dashboard');
         }
         if ($this->isPost()) {
             csrf_guard();
@@ -44,30 +47,112 @@ final class AuthController extends BaseController
                 redirect('register');
             }
 
-            $name  = str_input('name');
+            $firstName = str_input('first_name');
+            $lastName  = str_input('last_name');
+            $name  = trim($firstName . ' ' . $lastName);
             $email = str_input('email');
+            $phone = str_input('phone');
             $pass  = (string) input('password', '');
             $company = str_input('company');
+            $sendingMode = str_input('sending_mode') === 'domain' ? 'domain' : 'smtp';
 
             $errors = [];
-            if (mb_strlen($name) < 2)                              $errors[] = 'Please enter your name.';
-            if (!filter_var($email, FILTER_VALIDATE_EMAIL))        $errors[] = 'Please enter a valid email.';
-            if (strlen($pass) < 8)                                 $errors[] = 'Password must be at least 8 characters.';
-            if (User::findByEmail($email))                         $errors[] = 'That email is already registered.';
-            if (!input('agree'))                                   $errors[] = 'Please accept the Terms and policies to continue.';
+            if (mb_strlen($firstName) < 1)                         $errors['first_name'] = 'Please enter your first name.';
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL))        $errors['email'] = 'Please enter a valid email.';
+            elseif (User::findByEmail($email))                     $errors['email'] = 'That email is already registered.';
+            if (strlen($pass) < 8)                                 $errors['password'] = 'Password must be at least 8 characters.';
+            if (!input('agree'))                                   $errors['agree'] = 'Please accept the Terms and policies to continue.';
 
             if ($errors === []) {
-                $id = User::create($name, $email, $pass, $company ?: null);
+                $id = User::create($name, $email, $pass, $company ?: null, $phone ?: null, $sendingMode);
                 $user = User::find($id);
                 self::sendVerificationEmail($user);
                 session_regenerate_id(true);
                 $_SESSION['user_id'] = $id;
                 flash('success', 'Welcome to ' . APP_NAME . '! We sent a verification link to your email.');
-                redirect('dashboard');
+                redirect('onboarding/step1');
             }
-            flash('error', implode(' ', $errors));
+            view_bare('auth/register', [
+                'googleEnabled' => GoogleAuth::isConfigured(),
+                'errors' => $errors,
+                'old'    => $_POST,
+            ], 'Create account');
+            return;
         }
-        view_bare('auth/register', [], 'Create account');
+        view_bare('auth/register', [
+            'googleEnabled' => GoogleAuth::isConfigured(),
+            'errors' => [],
+            'old'    => [],
+        ], 'Create account');
+    }
+
+    /** Redirect to Google's consent screen. */
+    public function googleStart(): void
+    {
+        if (Auth::check()) {
+            redirect(Auth::isAdmin() ? 'admin' : 'dashboard');
+        }
+        if (!GoogleAuth::isConfigured()) {
+            flash('error', 'Google sign-in is not configured yet.');
+            redirect('login');
+        }
+        $state = bin2hex(random_bytes(16));
+        $_SESSION['_google_state'] = $state;
+        redirect(GoogleAuth::authUrl($state));
+    }
+
+    /** Handle Google's redirect back: exchange the code, find-or-create the user, log them in. */
+    public function googleCallback(): void
+    {
+        if (Auth::check()) {
+            redirect(Auth::isAdmin() ? 'admin' : 'dashboard');
+        }
+
+        $state = str_input('state');
+        $expected = $_SESSION['_google_state'] ?? null;
+        unset($_SESSION['_google_state']);
+        if (!is_string($expected) || $state === '' || !hash_equals($expected, $state)) {
+            flash('error', 'Your Google sign-in session expired. Please try again.');
+            redirect('login');
+        }
+
+        $code = str_input('code');
+        if ($code === '') {
+            flash('error', 'Google sign-in was cancelled.');
+            redirect('login');
+        }
+
+        $profile = GoogleAuth::fetchProfile($code);
+        if (!$profile || !$profile['email_verified']) {
+            flash('error', 'Could not verify your Google account. Please try again.');
+            redirect('login');
+        }
+
+        $user = User::findByGoogleId($profile['sub']);
+        if (!$user) {
+            $user = User::findByEmail($profile['email']);
+            if ($user) {
+                // Link the existing password-based account to this Google identity.
+                User::update((int) $user['id'], ['google_id' => $profile['sub'], 'is_verified' => 1]);
+            } else {
+                if (RateLimiter::tooMany('register:' . client_ip(), 5, 3600)) {
+                    flash('error', 'Too many sign-ups from this network. Please try again later.');
+                    redirect('login');
+                }
+                $id = User::createWithGoogle($profile['name'], $profile['email'], $profile['sub']);
+                $user = User::find($id);
+            }
+        }
+
+        if ((int) $user['status'] !== 1) {
+            flash('error', 'This account has been disabled.');
+            redirect('login');
+        }
+
+        session_regenerate_id(true);
+        $_SESSION['user_id'] = (int) $user['id'];
+        User::update((int) $user['id'], ['last_login_at' => date('Y-m-d H:i:s')]);
+        redirect($user['role'] === 'admin' ? 'admin' : (empty($user['onboarding_completed_at']) ? 'onboarding/step1' : 'dashboard'));
     }
 
     public function logout(): void
@@ -135,7 +220,7 @@ final class AuthController extends BaseController
         } else {
             flash('error', 'Invalid verification link.');
         }
-        redirect(Auth::check() ? 'dashboard' : 'login');
+        redirect(Auth::check() ? (Auth::isAdmin() ? 'admin' : 'dashboard') : 'login');
     }
 
     // ----------------------------------------------------------------

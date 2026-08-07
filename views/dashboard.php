@@ -5,37 +5,41 @@ $sparkColors = [
 ];
 ?>
 
-<?php if (!empty($onboarding) && !$onboarding['complete']): ?>
-<!-- Getting-started checklist (auto-hides when complete) -->
-<div class="card mb-3 border-0" style="background:linear-gradient(135deg,#6d5efc,#8b5cf6)">
-  <div class="card-body text-white">
-    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
-      <div>
-        <h5 class="mb-0"><i class="bi bi-rocket-takeoff"></i> Get set up to send</h5>
-        <small class="opacity-75">Finish these steps to launch your first campaign.</small>
+<?php if (!empty($onboarding) && !$onboarding['complete']):
+  $gsAccents = ['#22d3ee', '#fbbf24', '#34d399', '#60a5fa', '#f472b6', '#a78bfa'];
+  $firstPending = null;
+  foreach ($onboarding['steps'] as $i => $s) { if (!$s['done'] && $firstPending === null) { $firstPending = $i; } }
+?>
+<!-- Getting-started timeline (auto-hides when complete) -->
+<div class="card mb-4 border-0">
+  <div class="card-body">
+    <div class="gs-wrap">
+      <h2 class="gs-title">Good <?= e($greeting ?? 'Day') ?>, <?= e($firstName ?? 'there') ?> 👋</h2>
+      <p class="gs-sub">Welcome to <?= e(Site::name()) ?>! To send your first email campaign, please complete these simple steps.</p>
+      <div class="gs-timeline">
+        <?php foreach ($onboarding['steps'] as $i => $s):
+          $rowClass = $s['done'] ? 'gs-done' : ($i === $firstPending ? 'gs-current' : '');
+          $accent = $gsAccents[$i % count($gsAccents)];
+        ?>
+          <div class="gs-row <?= $rowClass ?>">
+            <div class="gs-num-col"><div class="gs-num"><?= $s['done'] ? '<i class="bi bi-check-lg"></i>' : ($i + 1) ?></div></div>
+            <a href="<?= url($s['url']) ?>" class="gs-card <?= $s['done'] ? 'gs-done' : '' ?>" style="--gs-accent:<?= e($accent) ?>">
+              <div class="gs-icon"><i class="bi bi-<?= e($s['icon']) ?>"></i></div>
+              <div>
+                <div class="gs-card-title"><?= e($s['title']) ?></div>
+                <div class="gs-card-desc"><?= e($s['desc']) ?></div>
+              </div>
+              <?php if ($s['done']): ?><i class="bi bi-check-circle-fill gs-check"></i><?php endif; ?>
+            </a>
+          </div>
+        <?php endforeach; ?>
       </div>
-      <span class="badge bg-white text-dark fs-6"><?= $onboarding['done'] ?>/<?= $onboarding['total'] ?> done</span>
-    </div>
-    <div class="progress mb-3" style="height:6px;background:rgba(255,255,255,.25)">
-      <div class="progress-bar bg-white" style="width:<?= round($onboarding['done'] / $onboarding['total'] * 100) ?>%"></div>
-    </div>
-    <div class="row g-2">
-      <?php foreach ($onboarding['steps'] as $s): ?>
-        <div class="col-md-6 col-xl-4">
-          <a href="<?= url($s['url']) ?>" class="d-flex align-items-center gap-2 text-white text-decoration-none p-2 rounded-3" style="background:rgba(255,255,255,<?= $s['done'] ? '.10' : '.18' ?>)">
-            <i class="bi bi-<?= $s['done'] ? 'check-circle-fill' : $s['icon'] ?>" style="font-size:1.3rem;<?= $s['done'] ? 'color:#bbf7d0' : '' ?>"></i>
-            <span class="small">
-              <span class="<?= $s['done'] ? 'text-decoration-line-through opacity-75' : 'fw-semibold' ?>"><?= e($s['title']) ?></span>
-              <?php if (!$s['done']): ?><br><span class="opacity-75" style="font-size:.78rem"><?= e($s['desc']) ?></span><?php endif; ?>
-            </span>
-          </a>
-        </div>
-      <?php endforeach; ?>
     </div>
   </div>
 </div>
 <?php endif; ?>
 
+<?php if (!empty($onboarding) && $onboarding['complete']): ?>
 <!-- Stat cards -->
 <div class="row g-3 mb-3">
   <?php foreach ($cards as $c):
@@ -107,8 +111,8 @@ $sparkColors = [
             $legend = [
               ['#10b981', 'Opens', $stats['open_rate'] . '%', $stats['opens']],
               ['#3b82f6', 'Clicks', $stats['click_rate'] . '%', $stats['clicks']],
-              ['#f59e0b', 'Unsubscribed', '0%', $stats['unsubscribed']],
-              ['#8b5cf6', 'Bounced', '0%', $stats['failed']],
+              ['#f59e0b', 'Unsubscribed', $stats['unsub_rate'] . '%', $stats['unsubscribed']],
+              ['#8b5cf6', 'Bounced', $stats['bounce_rate'] . '%', $stats['failed']],
             ];
             foreach ($legend as [$col, $lbl, $pct, $n]): ?>
               <div class="legend-row">
@@ -138,7 +142,7 @@ $sparkColors = [
             <span class="ms-auto"><?= status_badge($topCampaign['status']) ?></span>
           </div>
           <div class="row text-center g-2">
-            <?php foreach ([['Sent', (int) $topCampaign['sent_count']], ['Opens', $topCampaign['open_rate'] . '%'], ['Clicks', $topCampaign['click_rate'] . '%'], ['Opens', (int) $topCampaign['opens']]] as $i => [$l, $v]): ?>
+            <?php foreach ([['Sent', (int) $topCampaign['sent_count']], ['Opens', $topCampaign['open_rate'] . '%'], ['Clicks', $topCampaign['click_rate'] . '%'], ['Clicks', (int) $topCampaign['clicks']]] as $i => [$l, $v]): ?>
               <div class="col-3"><div class="fw-bold"><?= e((string) $v) ?></div><div class="text-muted small"><?= $l ?></div></div>
             <?php endforeach; ?>
           </div>
@@ -149,6 +153,7 @@ $sparkColors = [
     </div>
   </div>
 </div>
+<?php endif; ?>
 
 <!-- Recent campaigns + SMTP -->
 <div class="row g-3 mt-0">

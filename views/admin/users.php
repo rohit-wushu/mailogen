@@ -1,6 +1,6 @@
 <?php /** @var array $users @var array $plans */ ?>
 <div class="page-head">
-  <h2>Manage Users</h2>
+  <h2>Companies / Workspaces</h2>
   <div class="d-flex gap-2">
     <a href="<?= url('admin/plans') ?>" class="btn btn-light"><i class="bi bi-grid"></i> Plans</a>
   </div>
@@ -27,12 +27,17 @@
             <td><?= (int) $u['status'] === 1 ? '<span class="status-pill status-active">Active</span>' : '<span class="status-pill status-unsubscribed">Suspended</span>' ?></td>
             <td class="small text-muted"><?= fmt_dt($u['last_login_at']) ?></td>
             <td class="text-end">
+              <a href="<?= url('admin/users/view?id=' . (int) $u['id']) ?>" class="btn btn-sm btn-light" title="View details"><i class="bi bi-eye"></i></a>
               <?php if ($u['role'] !== 'admin'): ?>
+                <form method="post" action="<?= url('admin/impersonate') ?>" class="d-inline">
+                  <?= csrf_field() ?><input type="hidden" name="id" value="<?= (int) $u['id'] ?>">
+                  <button class="btn btn-sm btn-light" title="Login as this user"><i class="bi bi-incognito"></i></button>
+                </form>
                 <form method="post" action="<?= url('admin/users/toggle') ?>" class="d-inline">
                   <?= csrf_field() ?><input type="hidden" name="id" value="<?= (int) $u['id'] ?>">
                   <button class="btn btn-sm btn-light"><?= (int) $u['status'] === 1 ? '<i class="bi bi-lock"></i> Suspend' : '<i class="bi bi-unlock"></i> Activate' ?></button>
                 </form>
-              <?php else: ?><span class="text-muted small">—</span><?php endif; ?>
+              <?php endif; ?>
             </td>
           </tr>
         <?php endforeach; ?>

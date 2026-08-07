@@ -32,9 +32,10 @@ final class BillingController extends BaseController
             redirect('billing');
         }
         $months = max(1, min(12, int_input('months', 1)));
+        $price  = Plan::priceFor($plan, (string) ($this->user['sending_mode'] ?? 'smtp'));
 
         // Free plan — apply immediately, no approval needed.
-        if ((float) $plan['price_monthly'] <= 0) {
+        if ($price <= 0) {
             Billing::activate($this->uid(), (int) $plan['id'], 0);
             flash('success', 'You are now on the ' . $plan['name'] . ' plan.');
             redirect('billing');
@@ -55,7 +56,7 @@ final class BillingController extends BaseController
             'user_id'       => $this->uid(),
             'plan_id'       => (int) $plan['id'],
             'period_months' => $months,
-            'amount'        => (float) $plan['price_monthly'] * $months,
+            'amount'        => $price * $months,
             'currency'      => BILLING_CURRENCY,
             'status'        => 'pending',
         ]);
@@ -80,13 +81,14 @@ final class BillingController extends BaseController
         if (!$plan) {
             json_response(['ok' => false, 'error' => 'Unknown plan.'], 404);
         }
-        if ((float) $plan['price_monthly'] <= 0) {
+        $price = Plan::priceFor($plan, (string) ($this->user['sending_mode'] ?? 'smtp'));
+        if ($price <= 0) {
             // Free plan — just switch to it.
             $this->activate((int) $plan['id'], 0, 'manual', null);
             json_response(['ok' => true, 'demo' => true, 'message' => 'You are on the ' . $plan['name'] . ' plan.']);
         }
 
-        $amount = (float) $plan['price_monthly'] * $months;
+        $amount = $price * $months;
 
         // DEMO mode: record a paid payment and activate immediately.
         if (!Razorpay::isConfigured()) {

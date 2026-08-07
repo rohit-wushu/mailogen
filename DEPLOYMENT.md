@@ -60,9 +60,11 @@ Hostinger panel → **Advanced → Cron Jobs**. Add these (CLI form; adjust the 
 |---|---|
 | Every 5 min | `php /home/USER/domains/yourdomain.com/emailer-tool/cron/send-emails.php` |
 | Every 15 min | `php /home/USER/domains/yourdomain.com/emailer-tool/cron/automations.php` |
+| Every 15 min | `php /home/USER/domains/yourdomain.com/emailer-tool/cron/ab-test.php` |
 | Every 30 min | `php /home/USER/domains/yourdomain.com/emailer-tool/cron/bounces.php` |
+| Daily | `php /home/USER/domains/yourdomain.com/emailer-tool/cron/warmup.php` |
 
-`send-emails.php` rolls over daily SMTP limits, launches due scheduled campaigns, and drains the send queue. The others run follow-up automations and read bounces/replies (bounces needs the PHP `imap` extension; it self-skips if absent).
+`send-emails.php` rolls over daily SMTP limits, launches due scheduled campaigns, and drains the send queue. `ab-test.php` decides subject-line A/B tests once their test window elapses and releases the holdout batch with the winning subject. `warmup.php` ramps up daily sending limits for SMTP accounts/domains still in warm-up. The others run follow-up automations and read bounces/replies (bounces needs the PHP `imap` extension; it self-skips if absent).
 
 **URL-based alternative** (if CLI cron isn't available) — append your `CRON_KEY`:
 ```

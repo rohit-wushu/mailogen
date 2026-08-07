@@ -1,4 +1,4 @@
-<?php /** @var array $plans */ ?>
+<?php /** @var array $plans @var string $modeCompareSmtp @var string $modeCompareDomain */ ?>
 <div class="page-head">
   <div>
     <h2 class="mb-1">Subscription Plans</h2>
@@ -35,6 +35,27 @@
 
 <p class="text-muted small mt-3"><i class="bi bi-info-circle"></i> Tip: set <strong>−1</strong> on any limit for “Unlimited”. Assign plans to individual users from <a href="<?= url('admin/users') ?>">Manage Users</a>.</p>
 
+<div class="card mt-4">
+  <div class="card-header"><i class="bi bi-columns-gap text-brand me-1"></i> Sending-mode comparison</div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">This powers the <i class="bi bi-info-circle"></i> “Compare” popup users see next to the SMTP / hosted-sending picker on Sign up and Settings. One feature per line — prefix a line with <code>-</code> to show it struck-through (not included).</p>
+    <form method="post" action="<?= url('admin/plans/mode-compare') ?>">
+      <?= csrf_field() ?>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label">Bring your own SMTP</label>
+          <textarea class="form-control font-monospace" name="mode_compare_smtp" rows="6"><?= e($modeCompareSmtp) ?></textarea>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">Hosted sending (domain)</label>
+          <textarea class="form-control font-monospace" name="mode_compare_domain" rows="6"><?= e($modeCompareDomain) ?></textarea>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-sm mt-3"><i class="bi bi-save"></i> Save comparison</button>
+    </form>
+  </div>
+</div>
+
 <!-- Plan editor modal -->
 <div class="modal fade" id="planModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
@@ -47,9 +68,13 @@
         <div class="row g-3 mb-3">
           <div class="col-md-6"><label class="form-label">Plan name *</label><input class="form-control" name="name" id="pl_name" placeholder="e.g. Pro" required></div>
           <div class="col-md-6"><label class="form-label">Tagline</label><input class="form-control" name="tagline" id="pl_tagline" placeholder="e.g. For growing senders"></div>
-          <div class="col-md-4"><label class="form-label">Price</label>
+          <div class="col-md-4"><label class="form-label">SMTP price <span class="text-muted small">(bring your own)</span></label>
             <div class="input-group"><span class="input-group-text"><?= e(BILLING_CURRENCY === 'INR' ? '₹' : '$') ?></span>
-              <input type="number" step="0.01" min="0" class="form-control" name="price_monthly" id="pl_price" value="0"></div>
+              <input type="number" step="0.01" min="0" class="form-control" name="price_smtp" id="pl_price_smtp" value="0"></div>
+          </div>
+          <div class="col-md-4"><label class="form-label">Domain / SES price</label>
+            <div class="input-group"><span class="input-group-text"><?= e(BILLING_CURRENCY === 'INR' ? '₹' : '$') ?></span>
+              <input type="number" step="0.01" min="0" class="form-control" name="price_domain" id="pl_price_domain" value="0"></div>
           </div>
           <div class="col-md-4"><label class="form-label">Per</label>
             <select class="form-select" name="price_period" id="pl_period">
@@ -57,7 +82,7 @@
               <option value="year">/ year</option>
             </select>
           </div>
-          <div class="col-md-4"><label class="form-label">Billed note</label><input class="form-control" name="billed_note" id="pl_billed" placeholder="e.g. $36 billed annually"></div>
+          <div class="col-md-6"><label class="form-label">Billed note</label><input class="form-control" name="billed_note" id="pl_billed" placeholder="e.g. ₹36 billed annually"></div>
           <div class="col-md-6"><label class="form-label">Button label</label><input class="form-control" name="cta_label" id="pl_cta" placeholder="Subscribe"></div>
           <div class="col-md-3"><label class="form-label">Sort order</label><input type="number" class="form-control" name="sort_order" id="pl_sort" value="0"></div>
           <div class="col-md-3 d-flex align-items-end gap-3">
@@ -90,13 +115,15 @@ function newPlan() {
   document.getElementById('planModalTitle').textContent = 'Add plan';
   const f = document.querySelector('#planModal form'); f.reset();
   pl_id.value=''; pl_period.value='month'; pl_active.checked=true; pl_featured.checked=false;
-  pl_contacts.value=1000; pl_campaigns.value=10; pl_smtp.value=1; pl_emails.value=5000; pl_price.value=0; pl_sort.value=0;
+  pl_contacts.value=1000; pl_campaigns.value=10; pl_smtp.value=1; pl_emails.value=5000;
+  pl_price_smtp.value=0; pl_price_domain.value=0; pl_sort.value=0;
   new bootstrap.Modal('#planModal').show();
 }
 function editPlan(p) {
   document.getElementById('planModalTitle').textContent = 'Edit ' + p.name;
   pl_id.value=p.id; pl_name.value=p.name||''; pl_tagline.value=p.tagline||'';
-  pl_price.value=p.price_monthly||0; pl_period.value=p.price_period||'month'; pl_billed.value=p.billed_note||'';
+  pl_price_smtp.value=p.price_smtp||0; pl_price_domain.value=p.price_domain||0;
+  pl_period.value=p.price_period||'month'; pl_billed.value=p.billed_note||'';
   pl_cta.value=p.cta_label||'Subscribe'; pl_sort.value=p.sort_order||0; pl_features.value=p.features||'';
   pl_featured.checked=Number(p.is_featured)===1; pl_active.checked=Number(p.is_active)===1;
   pl_contacts.value=p.max_contacts; pl_campaigns.value=p.max_campaigns; pl_smtp.value=p.max_smtp; pl_emails.value=p.monthly_emails;

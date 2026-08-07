@@ -22,6 +22,61 @@ final class AdminController extends BaseController
         ], 'Manage Users');
     }
 
+    /** Full drill-down on one tenant: profile, sending setup, activity, deliverability. */
+    public function viewUser(): void
+    {
+        $this->requireAdmin();
+        $id = int_input('id');
+        $target = User::find($id);
+        if (!$target) {
+            http_response_code(404);
+            exit('User not found.');
+        }
+
+        $sentCount = (int) db_one(
+            "SELECT COUNT(*) FROM email_queue WHERE user_id = ? AND status = 'sent'", [$id]
+        );
+
+        $this->render('admin/user_view', [
+            'target'          => $target,
+            'plan'            => !empty($target['plan_id']) ? Plan::find((int) $target['plan_id']) : null,
+            'domains'         => Domain::allForUser($id),
+            'campaignCount'   => Campaign::countForUser($id),
+            'recentCampaigns' => array_slice(Campaign::withStats($id), 0, 5),
+            'contactCount'    => Contact::countForUser($id),
+            'smtpCount'       => SmtpAccount::countForUser($id),
+            'sentCount'       => $sentCount,
+            'rates'           => Reputation::ratesByUser($id),
+        ], 'Tenant: ' . $target['name']);
+    }
+
+    /** Read-only view of one tenant's contacts — for support/debugging, not editable from here. */
+    public function userContacts(): void
+    {
+        $this->requireAdmin();
+        $id = int_input('id');
+        $target = User::find($id);
+        if (!$target) {
+            http_response_code(404);
+            exit('User not found.');
+        }
+
+        $q = str_input('q');
+        $page = max(1, int_input('page', 1));
+        $perPage = 50;
+        $opts = ['q' => $q, 'limit' => $perPage, 'offset' => ($page - 1) * $perPage];
+
+        $total = Contact::countSearch($id, $opts);
+        $this->render('admin/user_contacts', [
+            'target' => $target,
+            'rows'   => Contact::search($id, $opts),
+            'total'  => $total,
+            'page'   => $page,
+            'pages'  => (int) ceil(max(1, $total) / $perPage),
+            'q'      => $q,
+        ], 'Contacts: ' . $target['name']);
+    }
+
     public function toggleUser(): void
     {
         $this->requireAdmin();
@@ -32,6 +87,42 @@ final class AdminController extends BaseController
             User::update($id, ['status' => (int) $u['status'] === 1 ? 0 : 1]);
         }
         $this->back('admin/users');
+    }
+
+    /** Log in as a tenant to see exactly what they see, e.g. for support/debugging. Audited + reversible. */
+    public function impersonate(): void
+    {
+        $this->requireAdmin();
+        csrf_guard();
+        $target = User::find(int_input('id'));
+        if (!$target || $target['role'] === 'admin') {
+            flash('error', 'That account cannot be impersonated.');
+            $this->back('admin/users');
+        }
+
+        $adminId = $this->uid();
+        $_SESSION['impersonator_id'] = $adminId;
+        session_regenerate_id(true);
+        $_SESSION['user_id'] = (int) $target['id'];
+
+        SystemLog::write('warning', 'admin.impersonate', "Admin #{$adminId} started impersonating user #{$target['id']} ({$target['email']})", $adminId);
+        redirect('dashboard');
+    }
+
+    /** Return from an impersonation session back to the admin's own account. */
+    public function stopImpersonate(): void
+    {
+        $impersonatorId = (int) ($_SESSION['impersonator_id'] ?? 0);
+        if ($impersonatorId <= 0) {
+            redirect('login');
+        }
+        $tenantId = (int) ($_SESSION['user_id'] ?? 0);
+        unset($_SESSION['impersonator_id']);
+        session_regenerate_id(true);
+        $_SESSION['user_id'] = $impersonatorId;
+
+        SystemLog::write('info', 'admin.impersonate', "Admin #{$impersonatorId} stopped impersonating user #{$tenantId}", $impersonatorId);
+        redirect('admin/users');
     }
 
     public function setPlan(): void
@@ -51,8 +142,21 @@ final class AdminController extends BaseController
     {
         $this->requireAdmin();
         $this->render('admin/plans', [
-            'plans' => Plan::all(),
+            'plans'             => Plan::all(),
+            'modeCompareSmtp'   => Plan::modeCompareRaw('smtp'),
+            'modeCompareDomain' => Plan::modeCompareRaw('domain'),
         ], 'Subscription Plans');
+    }
+
+    /** Save the SMTP-vs-domain comparison shown in the info modal on register/settings. */
+    public function storeModeCompare(): void
+    {
+        $this->requireAdmin();
+        csrf_guard();
+        Setting::set('mode_compare_smtp', trim((string) input('mode_compare_smtp', '')) ?: null);
+        Setting::set('mode_compare_domain', trim((string) input('mode_compare_domain', '')) ?: null);
+        flash('success', 'Sending-mode comparison saved.');
+        $this->back('admin/plans');
     }
 
     /** Create or update a pricing plan from the admin editor. */
@@ -70,10 +174,14 @@ final class AdminController extends BaseController
         // -1 means unlimited; keep the sentinel, otherwise clamp to >= 0.
         $limit = static fn (string $k): int => (int) input($k) < 0 ? -1 : max(0, (int) input($k));
 
+        $priceSmtp = max(0, (float) input('price_smtp', 0));
+        $priceDom  = max(0, (float) input('price_domain', 0));
         $data = [
             'name'           => $name,
             'tagline'        => str_input('tagline') ?: null,
-            'price_monthly'  => max(0, (float) input('price_monthly', 0)),
+            'price_smtp'     => $priceSmtp,
+            'price_domain'   => $priceDom,
+            'price_monthly'  => $priceDom, // legacy column, kept in sync for any code that still reads it
             'price_period'   => in_array(str_input('price_period'), ['month', 'year'], true) ? str_input('price_period') : 'month',
             'billed_note'    => str_input('billed_note') ?: null,
             'cta_label'      => str_input('cta_label') ?: 'Subscribe',
@@ -132,6 +240,123 @@ final class AdminController extends BaseController
         $this->render('admin/logs', [
             'logs' => SystemLog::recent(300),
         ], 'System Logs');
+    }
+
+    // ---- Deliverability (platform-wide + per-tenant bounce/complaint health) ----
+
+    public function deliverability(): void
+    {
+        $this->requireAdmin();
+        $this->render('admin/deliverability', [
+            'platform' => Reputation::platformRates(),
+            'risky'    => Reputation::riskyTenants(15),
+            'recent'   => EmailLog::recentBounceComplaint(30),
+        ], 'Deliverability');
+    }
+
+    // ---- Global suppression list (platform-wide, protects shared SES) ----
+
+    public function suppression(): void
+    {
+        $this->requireAdmin();
+        $q = str_input('q');
+        $page = max(1, int_input('page', 1));
+        $perPage = 50;
+        $this->render('admin/suppression', [
+            'rows'  => GlobalSuppression::search($q, $perPage, ($page - 1) * $perPage),
+            'total' => GlobalSuppression::count($q),
+            'page'  => $page,
+            'pages' => (int) ceil(max(1, GlobalSuppression::count($q)) / $perPage),
+            'q'     => $q,
+        ], 'Global Suppression List');
+    }
+
+    public function addSuppression(): void
+    {
+        $this->requireAdmin();
+        csrf_guard();
+        $email = strtolower(str_input('email'));
+        if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            GlobalSuppression::add($email, 'manual', $this->uid());
+            flash('success', $email . ' added to the platform suppression list. No tenant will be able to send to it.');
+        } else {
+            flash('error', 'Please enter a valid email address.');
+        }
+        $this->back('admin/suppression');
+    }
+
+    public function removeSuppression(): void
+    {
+        $this->requireAdmin();
+        csrf_guard();
+        GlobalSuppression::delete(int_input('id'));
+        flash('success', 'Address removed from the platform suppression list.');
+        $this->back('admin/suppression');
+    }
+
+    // ---- Amazon SES (platform-level sending connection) --------------
+
+    public function ses(): void
+    {
+        $this->requireAdmin();
+        $this->render('admin/ses', [
+            'sesConn'              => SesConnection::platform(),
+            'autoUpgradeEnabled'   => Setting::get('auto_ses_enabled', '0') === '1',
+            'autoUpgradeThreshold' => (int) (Setting::get('auto_ses_threshold', '5000') ?: 5000),
+        ], 'Amazon SES');
+    }
+
+    /** Auto-upgrade: campaigns over the recipient threshold move the account to domain (SES) sending automatically. */
+    public function storeAutoUpgrade(): void
+    {
+        $this->requireAdmin();
+        csrf_guard();
+        Setting::set('auto_ses_enabled', input('auto_ses_enabled') ? '1' : '0');
+        Setting::set('auto_ses_threshold', (string) max(1, (int) input('auto_ses_threshold', 5000)));
+        flash('success', 'Auto-upgrade settings saved.');
+        $this->back('admin/ses');
+    }
+
+    /** Save (or replace) the platform's single Amazon SES connection, then verify it. */
+    public function storeSes(): void
+    {
+        $this->requireAdmin();
+        csrf_guard();
+
+        $accessKey = str_input('access_key');
+        $secretKey = (string) input('secret_key', '');
+        $region    = str_input('region') ?: 'us-east-1';
+
+        $existing = SesConnection::platform();
+        if ($accessKey === '' || ($secretKey === '' && !$existing)) {
+            flash('error', 'Access Key and Secret Key are both required.');
+            $this->back('admin/ses');
+        }
+        // Editing with a blank secret keeps the stored one.
+        if ($secretKey === '' && $existing) {
+            $secretKey = Crypto::decrypt($existing['secret_key']);
+        }
+
+        $id = SesConnection::save($this->uid(), $accessKey, $secretKey, $region);
+        $res = Ses::verify(['access_key' => $accessKey, 'secret_key' => $secretKey, 'region' => $region]);
+        SesConnection::markVerified($id, $res['ok'], $res['error']);
+
+        flash($res['ok'] ? 'success' : 'error', $res['ok']
+            ? 'Amazon SES connected — every tenant with a verified Sending Domain can now send campaigns.'
+            : 'Saved, but the connection test failed: ' . $res['error']);
+        $this->back('admin/ses');
+    }
+
+    public function disconnectSes(): void
+    {
+        $this->requireAdmin();
+        csrf_guard();
+        $conn = SesConnection::platform();
+        if ($conn) {
+            SesConnection::delete((int) $conn['id']);
+            flash('success', 'Amazon SES disconnected. Domain-based campaigns will stop sending for every tenant until you reconnect.');
+        }
+        $this->back('admin/ses');
     }
 
     // ---- Branding (free-plan email footer) ---------------------------

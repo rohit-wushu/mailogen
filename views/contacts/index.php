@@ -1,4 +1,9 @@
-<?php /** @var array $contacts @var array $lists @var array $tags @var int $total @var int $page @var int $pages @var array $filters @var array $cardStats @var array $verifyCounts */ ?>
+<?php /** @var array $contacts @var array $lists @var array $tags @var int $total @var int $page @var int $pages @var array $filters @var array $cardStats @var array $verifyCounts */
+$sparkColors = [
+  'violet' => '#6d5efc', 'pink' => '#ec4899', 'green' => '#10b981', 'blue' => '#3b82f6',
+  'orange' => '#f59e0b', 'sky' => '#0ea5e9', 'red' => '#ef4444', 'teal' => '#14b8a6',
+];
+?>
 <div class="page-head">
   <h2>Contacts</h2>
   <div class="d-flex gap-2">
@@ -55,7 +60,29 @@
   </div>
 </div>
 
-<?= render_stat_cards($cardStats, 3) ?>
+<div class="row g-3 mb-3">
+  <?php foreach ($cardStats as $c):
+    $delta = (float) $c['delta'];
+    $dir = $delta > 0 ? 'up' : ($delta < 0 ? 'down' : 'flat');
+    $arrow = $delta > 0 ? 'arrow-up' : ($delta < 0 ? 'arrow-down' : 'dash');
+  ?>
+    <div class="col-6 col-xl-3">
+      <div class="stat-card stat-card--spark">
+        <div class="stat-head">
+          <div class="stat-icon grad-<?= e($c['grad']) ?>"><i class="bi bi-<?= e($c['icon']) ?>"></i></div>
+          <div class="stat-top">
+            <div class="stat-label"><?= e($c['label']) ?></div>
+            <div class="stat-value"><?= e($c['display']) ?></div>
+          </div>
+          <?= sparkline_svg($c['spark'], $sparkColors[$c['grad']] ?? '#6d5efc') ?>
+        </div>
+        <div class="stat-foot">
+          <span class="delta <?= $dir ?>"><i class="bi bi-<?= $arrow ?>"></i><?= $delta == 0.0 ? '0' : abs($delta) ?>%<span class="muted">vs last 14 days</span></span>
+        </div>
+      </div>
+    </div>
+  <?php endforeach; ?>
+</div>
 
 <div class="card">
   <div class="card-body border-bottom">

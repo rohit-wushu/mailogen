@@ -7,6 +7,40 @@ declare(strict_types=1);
 
 final class Stats
 {
+    /**
+     * First-run setup checklist (used by the dashboard timeline and the
+     * sidebar's "Basic setup" progress widget).
+     */
+    public static function onboardingProgress(array $user): array
+    {
+        $uid  = (int) $user['id'];
+        $sent = (int) db_one("SELECT COUNT(*) FROM email_logs WHERE user_id = ? AND event = 'sent'", [$uid]);
+
+        // Sending is domain-based now (verified domain, delivered through the
+        // platform's own Amazon SES connection — an admin-managed, platform-wide
+        // setting, not a per-tenant one); a legacy SMTP account still counts so
+        // existing setups aren't penalised.
+        $domainVerified = (int) db_one('SELECT COUNT(*) FROM domains WHERE user_id = ? AND is_verified = 1', [$uid]) > 0;
+        $smtpConnected  = (int) db_one('SELECT COUNT(*) FROM smtp_accounts WHERE user_id = ?', [$uid]) > 0;
+        $sendingReady   = $domainVerified || $smtpConnected;
+        $sendStep = $domainVerified
+            ? ['title' => 'Set up sending', 'desc' => 'Verify a domain to send from.', 'url' => 'domains']
+            : ['title' => 'Verify a sending domain', 'desc' => 'Add SPF/DKIM/DMARC for the domain you send from.', 'url' => 'domains'];
+        $steps = [
+            ['done' => $sendingReady, 'title' => $sendStep['title'], 'desc' => $sendStep['desc'], 'url' => $sendStep['url'], 'icon' => 'patch-check'],
+            ['done' => (int) db_one('SELECT COUNT(*) FROM contacts WHERE user_id = ?', [$uid]) > 0,
+             'title' => 'Add contacts', 'desc' => 'Import a CSV or add them manually.', 'url' => 'contacts/import', 'icon' => 'people'],
+            ['done' => trim((string) ($user['org_address'] ?? '')) !== '',
+             'title' => 'Set your mailing address', 'desc' => 'Required by law on every email footer.', 'url' => 'settings', 'icon' => 'geo-alt'],
+            ['done' => (int) db_one('SELECT COUNT(*) FROM campaigns WHERE user_id = ?', [$uid]) > 0,
+             'title' => 'Create a campaign', 'desc' => 'Design your first email.', 'url' => 'campaigns/edit', 'icon' => 'megaphone'],
+            ['done' => $sent > 0,
+             'title' => 'Send your first email', 'desc' => 'Launch a campaign or send a test.', 'url' => 'campaigns', 'icon' => 'send'],
+        ];
+        $doneCount = count(array_filter($steps, fn ($s) => $s['done']));
+        return ['steps' => $steps, 'done' => $doneCount, 'total' => count($steps), 'complete' => $doneCount === count($steps)];
+    }
+
     public static function dashboard(int $userId): array
     {
         $pdo = db();
@@ -25,7 +59,8 @@ final class Stats
         $uOpens  = $one("SELECT COUNT(DISTINCT contact_id) FROM opens WHERE user_id = ?", [$userId]);
         $uClicks = $one("SELECT COUNT(DISTINCT contact_id) FROM clicks WHERE user_id = ?", [$userId]);
 
-        $delivered = max(0, $sent);
+        $delivered   = max(0, $sent);
+        $unsubCount  = $one("SELECT COUNT(*) FROM unsubscribes WHERE user_id = ?", [$userId]);
 
         return [
             'contacts'     => $one("SELECT COUNT(*) FROM contacts WHERE user_id = ?", [$userId]),
@@ -35,10 +70,12 @@ final class Stats
             'failed'       => $failed,
             'opens'        => $opensTotal,
             'clicks'       => $clicksTot,
-            'unsubscribed' => $one("SELECT COUNT(*) FROM unsubscribes WHERE user_id = ?", [$userId]),
+            'unsubscribed' => $unsubCount,
             'active_smtp'  => $one("SELECT COUNT(*) FROM smtp_accounts WHERE user_id = ? AND is_enabled = 1", [$userId]),
             'open_rate'    => $delivered > 0 ? round($uOpens / $delivered * 100, 1) : 0.0,
             'click_rate'   => $delivered > 0 ? round($uClicks / $delivered * 100, 1) : 0.0,
+            'unsub_rate'   => $delivered > 0 ? round($unsubCount / $delivered * 100, 1) : 0.0,
+            'bounce_rate'  => $sent > 0 ? round($failed / $sent * 100, 1) : 0.0,
             'queue_pending'=> EmailQueue::pendingCount($userId),
         ];
     }
@@ -57,6 +94,7 @@ final class Stats
         $unsub  = self::dailyCounts($userId, 'unsubscribes', null, 14);
         $newC   = self::dailyCounts($userId, 'contacts', null, 14);
         $newCmp = self::dailyCounts($userId, 'campaigns', null, 14);
+        $newSmtp = self::dailyCounts($userId, 'smtp_accounts', null, 14);
 
         // Per-day open/click rate sparkline (guard divide-by-zero).
         $rate = static function (array $num, array $den): array {
@@ -93,7 +131,49 @@ final class Stats
             ['key' => 'open_rate', 'label' => 'Open Rate',      'display' => $d['open_rate'] . '%',    'delta' => $delta($opens),  'spark' => $rate($opens, $sent),                 'icon' => 'eye-fill',            'grad' => 'orange'],
             ['key' => 'click_rate','label' => 'Click Rate',     'display' => $d['click_rate'] . '%',   'delta' => $delta($clicks), 'spark' => $rate($clicks, $sent),                'icon' => 'cursor-fill',         'grad' => 'sky'],
             ['key' => 'unsub',     'label' => 'Unsubscribed',   'display' => (string) $d['unsubscribed'], 'delta' => $delta($unsub), 'spark' => $unsub,                            'icon' => 'person-dash-fill',    'grad' => 'red'],
-            ['key' => 'smtp',      'label' => 'Active SMTP',    'display' => (string) $d['active_smtp'],  'delta' => 0.0,           'spark' => array_fill(0, 14, $d['active_smtp']), 'icon' => 'hdd-network-fill',    'grad' => 'teal'],
+            ['key' => 'smtp',      'label' => 'Active SMTP',    'display' => (string) $d['active_smtp'],  'delta' => $delta($newSmtp), 'spark' => $cumulative($newSmtp, $d['active_smtp']), 'icon' => 'hdd-network-fill',    'grad' => 'teal'],
+        ];
+    }
+
+    /**
+     * Rich stat cards for the Contacts page — same shape as dashboardCards()
+     * (gradient icon, delta vs prior period, sparkline) so the two pages
+     * match visually.
+     */
+    public static function contactsCards(int $userId): array
+    {
+        $totalContacts = Contact::countForUser($userId);
+        $totalLists    = (int) db_one('SELECT COUNT(*) FROM contact_lists WHERE user_id = ?', [$userId]);
+        $totalTags     = (int) db_one('SELECT COUNT(*) FROM contact_tags WHERE user_id = ?', [$userId]);
+        $totalUnsub    = (int) db_one("SELECT COUNT(*) FROM contacts WHERE user_id = ? AND status = 'unsubscribed'", [$userId]);
+
+        $newContacts = self::dailyCounts($userId, 'contacts', null, 14);
+        $newLists    = self::dailyCounts($userId, 'contact_lists', null, 14);
+        $newTags     = self::dailyCounts($userId, 'contact_tags', null, 14);
+        $newUnsub    = self::dailyCounts($userId, 'unsubscribes', null, 14);
+
+        $delta = static function (array $s): float {
+            $half = (int) (count($s) / 2);
+            $prev = array_sum(array_slice($s, 0, $half));
+            $now  = array_sum(array_slice($s, $half));
+            if ($prev <= 0) {
+                return $now > 0 ? 100.0 : 0.0;
+            }
+            return round(($now - $prev) / $prev * 100, 0);
+        };
+
+        $cumulative = static function (array $daily, int $total): array {
+            $base = $total - array_sum($daily);
+            $run = $base; $out = [];
+            foreach ($daily as $v) { $run += $v; $out[] = max(0, $run); }
+            return $out;
+        };
+
+        return [
+            ['key' => 'contacts', 'label' => 'Total Contacts', 'display' => (string) $totalContacts, 'delta' => $delta($newContacts), 'spark' => $cumulative($newContacts, $totalContacts), 'icon' => 'people-fill',      'grad' => 'violet'],
+            ['key' => 'lists',    'label' => 'Lists',          'display' => (string) $totalLists,    'delta' => $delta($newLists),    'spark' => $cumulative($newLists, $totalLists),       'icon' => 'collection-fill',  'grad' => 'blue'],
+            ['key' => 'tags',     'label' => 'Tags',           'display' => (string) $totalTags,     'delta' => $delta($newTags),     'spark' => $cumulative($newTags, $totalTags),         'icon' => 'tags-fill',        'grad' => 'orange'],
+            ['key' => 'unsub',    'label' => 'Unsubscribed',   'display' => (string) $totalUnsub,    'delta' => $delta($newUnsub),    'spark' => $newUnsub,                                 'icon' => 'person-dash-fill', 'grad' => 'red'],
         ];
     }
 
@@ -193,7 +273,8 @@ final class Stats
             'smtp'       => $q('SELECT COUNT(*) FROM smtp_accounts'),
             'contacts'   => $q('SELECT COUNT(*) FROM contacts'),
             'revenue'    => (float) $pdo->query(
-                'SELECT COALESCE(SUM(p.price_monthly),0) FROM users u JOIN plans p ON p.id = u.plan_id'
+                "SELECT COALESCE(SUM(CASE WHEN u.sending_mode = 'domain' THEN p.price_domain ELSE p.price_smtp END),0)
+                 FROM users u JOIN plans p ON p.id = u.plan_id"
             )->fetchColumn(),
         ];
     }

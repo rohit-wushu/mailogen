@@ -1,4 +1,4 @@
-<?php /** @var ?array $campaign @var array $lists @var array $groups @var array $accounts @var array $templates @var array $schedules */ ?>
+<?php /** @var ?array $campaign @var array $lists @var array $domains @var bool $sesConnected @var array $senders @var array $replyIds @var array $groups @var array $accounts @var array $templates @var array $schedules */ ?>
 <div class="page-head">
   <h2><?= $campaign ? 'Edit Campaign' : 'Create Campaign' ?></h2>
   <a href="<?= url('campaigns') ?>" class="btn btn-light"><i class="bi bi-arrow-left"></i> Back to campaigns</a>
@@ -34,7 +34,39 @@
         <div class="card-header">Campaign Setup</div>
         <div class="card-body">
           <div class="mb-3"><label class="form-label">Campaign name *</label><input class="form-control" name="name" id="f_name" value="<?= e($campaign['name'] ?? '') ?>" required></div>
-          <div class="mb-0"><label class="form-label">Subject line *</label><input class="form-control" name="subject" id="cmp_subject" value="<?= e($campaign['subject'] ?? '') ?>" placeholder="Use {{first_name}} to personalise"></div>
+          <div class="mb-3"><label class="form-label">Subject line *</label><input class="form-control" name="subject" id="cmp_subject" value="<?= e($campaign['subject'] ?? '') ?>" placeholder="Use {{first_name}} to personalise"></div>
+
+          <?php $__abOn = !empty($campaign['ab_subject_b']); $__abDecided = !empty($campaign['ab_winner']); ?>
+          <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" name="ab_enabled" value="1" id="abToggle" <?= $__abOn ? 'checked' : '' ?> <?= $__abDecided ? 'disabled' : '' ?> onchange="document.getElementById('abBox').classList.toggle('d-none', !this.checked)">
+            <label class="form-check-label" for="abToggle">Test two subject lines (A/B)</label>
+          </div>
+          <div id="abBox" class="<?= $__abOn ? '' : 'd-none' ?> border rounded-3 p-3 mb-0" style="background:var(--bs-tertiary-bg)">
+            <?php if ($__abDecided): ?>
+              <div class="alert alert-success py-2 mb-3"><i class="bi bi-trophy"></i> Winner: variant <strong><?= strtoupper(e($campaign['ab_winner'])) ?></strong> — decided <?= e(fmt_dt($campaign['ab_decided_at'])) ?>. The rest of the list already went out with the winning subject.</div>
+            <?php endif; ?>
+            <label class="form-label">Subject B</label>
+            <input class="form-control mb-3" name="ab_subject_b" value="<?= e($campaign['ab_subject_b'] ?? '') ?>" placeholder="An alternate subject line to test against the one above" <?= $__abDecided ? 'disabled' : '' ?>>
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label">Test group size</label>
+                <select class="form-select" name="ab_test_pct" <?= $__abDecided ? 'disabled' : '' ?>>
+                  <?php foreach ([10, 20, 30, 50] as $pct): ?>
+                    <option value="<?= $pct ?>" <?= (int) ($campaign['ab_test_pct'] ?? 20) === $pct ? 'selected' : '' ?>><?= $pct ?>% of the list (split A/B), rest gets the winner</option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Decide winner after</label>
+                <select class="form-select" name="ab_test_hours" <?= $__abDecided ? 'disabled' : '' ?>>
+                  <?php foreach ([2, 4, 8, 24] as $hrs): ?>
+                    <option value="<?= $hrs ?>" <?= (int) ($campaign['ab_test_hours'] ?? 4) === $hrs ? 'selected' : '' ?>><?= $hrs ?> hour<?= $hrs > 1 ? 's' : '' ?> — highest open rate wins</option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+            </div>
+            <div class="form-text mt-2">Needs at least 4 recipients to run. The holdout majority waits for the winner instead of getting either test subject.</div>
+          </div>
         </div>
       </div>
 
@@ -109,20 +141,120 @@
               <span class="code-pill">{{Company}}</span>. Rows are added to your Contacts (deduped by email) when you send.
             </div>
           </div>
-          <div class="row g-3">
-            <div class="col-md-6">
-              <label class="form-label">SMTP rotation group</label>
-              <select class="form-select" name="smtp_group_id" id="grpSel" onchange="if(this.value)smtpSel.value=''">
-                <option value="">— use single account —</option>
-                <?php foreach ($groups as $g): ?><option value="<?= (int) $g['id'] ?>" <?= (int) ($campaign['smtp_group_id'] ?? 0) === (int) $g['id'] ? 'selected' : '' ?>><?= e($g['name']) ?> (<?= e(str_replace('_', ' ', $g['rotation_mode'])) ?>)</option><?php endforeach; ?>
-              </select>
+          <?php
+            $__domainAllowed = ($user['sending_mode'] ?? 'smtp') === 'domain';
+            $__sendVia = (!empty($campaign['smtp_id']) || !empty($campaign['smtp_group_id'])) ? 'smtp'
+                       : ((!empty($campaign['domain_id']) || ($__domainAllowed && !empty($domains))) ? 'domain' : 'smtp');
+          ?>
+          <div class="mb-3">
+            <label class="form-label">Send via</label>
+            <input type="hidden" name="send_via" id="sendVia" value="<?= $__sendVia ?>">
+            <div class="src-toggle" role="tablist">
+              <button type="button" class="src-opt <?= $__sendVia === 'domain' ? 'active' : '' ?> <?= $__domainAllowed ? '' : 'disabled' ?>" data-send="domain" <?= $__domainAllowed ? '' : 'disabled title="Switch to domain-based sending in Settings to unlock this"' ?>>
+                <i class="bi bi-shield-check"></i>
+                <span><span class="src-opt-title">Sending Domain <?= $__domainAllowed ? '' : '<i class="bi bi-lock-fill small"></i>' ?></span><span class="src-opt-sub">Verified domain, hosted by us</span></span>
+              </button>
+              <button type="button" class="src-opt <?= $__sendVia === 'smtp' ? 'active' : '' ?>" data-send="smtp">
+                <i class="bi bi-hdd-network-fill"></i>
+                <span><span class="src-opt-title">SMTP Account</span><span class="src-opt-sub">Gmail, Brevo, custom relay…</span></span>
+              </button>
             </div>
+            <?php if (!$__domainAllowed): ?>
+              <div class="form-text"><i class="bi bi-info-circle"></i> Domain-based sending is a plan add-on — <a href="<?= url('settings') ?>#tab-plan">switch to it in Settings</a> (pricing differs from SMTP).</div>
+            <?php endif; ?>
+          </div>
+
+          <!-- Send via: Sending Domain -->
+          <div data-send-panel="domain" class="<?= $__sendVia === 'smtp' ? 'd-none' : '' ?>">
+            <div class="row g-3">
+              <?php if (empty($domains)): ?>
+                <div class="col-12">
+                  <div class="alert alert-warning d-flex align-items-center justify-content-between flex-wrap gap-2 mb-0">
+                    <span><i class="bi bi-exclamation-triangle"></i> You need a <strong>verified Sending Domain</strong> before this campaign can send this way.</span>
+                    <a href="<?= url('domains') ?>" class="btn btn-sm btn-primary"><i class="bi bi-plus-lg"></i> Add a Sending Domain</a>
+                  </div>
+                </div>
+              <?php else: ?>
+                <?php if (!empty($senders)): ?>
+                  <div class="col-12">
+                    <label class="form-label">Sender <span class="text-muted small">(optional — fills in the fields below)</span></label>
+                    <select class="form-select" id="senderPick" onchange="applySender(this)">
+                      <option value="">— choose a saved sender, or fill in manually below —</option>
+                      <?php foreach ($senders as $s): ?>
+                        <option value="" data-domain-id="<?= (int) $s['domain_id'] ?>" data-name="<?= e($s['name']) ?>" data-email="<?= e($s['email']) ?>"><?= e($s['name']) ?> &lt;<?= e($s['email']) ?>&gt;</option>
+                      <?php endforeach; ?>
+                    </select>
+                  </div>
+                <?php endif; ?>
+                <div class="col-md-5">
+                  <label class="form-label">Sending Domain *</label>
+                  <select class="form-select" name="domain_id" id="domainSel">
+                    <option value="">— select —</option>
+                    <?php foreach ($domains as $d): ?><option value="<?= (int) $d['id'] ?>" data-domain="<?= e($d['domain']) ?>" <?= (int) ($campaign['domain_id'] ?? 0) === (int) $d['id'] ? 'selected' : '' ?>><?= e($d['domain']) ?></option><?php endforeach; ?>
+                  </select>
+                  <?php if (!$sesConnected): ?>
+                    <div class="form-text text-danger">
+                      <i class="bi bi-exclamation-triangle"></i>
+                      <?php if (($user['role'] ?? '') === 'admin'): ?>
+                        Amazon SES isn't connected yet — <a href="<?= url('admin/ses') ?>">connect it</a> before sending.
+                      <?php else: ?>
+                        Domain-based sending isn't connected on this platform yet — contact your administrator before sending.
+                      <?php endif; ?>
+                    </div>
+                  <?php endif; ?>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label">From name</label>
+                  <input class="form-control" name="from_name" id="fromName" value="<?= e($campaign['from_name'] ?? '') ?>" placeholder="Your Company">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">From email</label>
+                  <input type="email" class="form-control" name="from_email" id="fromEmail" value="<?= e($campaign['from_email'] ?? '') ?>" placeholder="campaigns@yourdomain.com">
+                  <div class="form-text">Must be an address on the domain selected above.</div>
+                </div>
+              <?php endif; ?>
+            </div>
+          </div>
+
+          <!-- Send via: SMTP Account -->
+          <div data-send-panel="smtp" class="<?= $__sendVia === 'smtp' ? '' : 'd-none' ?>">
+            <div class="row g-3">
+              <?php if (empty($groups) && empty($accounts)): ?>
+                <div class="col-12">
+                  <div class="alert alert-warning d-flex align-items-center justify-content-between flex-wrap gap-2 mb-0">
+                    <span><i class="bi bi-exclamation-triangle"></i> You need an <strong>SMTP account</strong> before this campaign can send this way.</span>
+                    <a href="<?= url('smtp') ?>" class="btn btn-sm btn-primary"><i class="bi bi-plus-lg"></i> Add SMTP Account</a>
+                  </div>
+                </div>
+              <?php else: ?>
+                <div class="col-md-6">
+                  <label class="form-label">SMTP rotation group</label>
+                  <select class="form-select" name="smtp_group_id" id="grpSel" onchange="if(this.value)smtpSel.value=''">
+                    <option value="">— use single account —</option>
+                    <?php foreach ($groups as $g): ?><option value="<?= (int) $g['id'] ?>" <?= (int) ($campaign['smtp_group_id'] ?? 0) === (int) $g['id'] ? 'selected' : '' ?>><?= e($g['name']) ?> (<?= e(str_replace('_', ' ', $g['rotation_mode'])) ?>)</option><?php endforeach; ?>
+                  </select>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">…or single SMTP account</label>
+                  <select class="form-select" name="smtp_id" id="smtpSel" onchange="if(this.value)grpSel.value=''">
+                    <option value="">— none —</option>
+                    <?php foreach ($accounts as $a): ?><option value="<?= (int) $a['id'] ?>" <?= (int) ($campaign['smtp_id'] ?? 0) === (int) $a['id'] ? 'selected' : '' ?>><?= e($a['label']) ?></option><?php endforeach; ?>
+                  </select>
+                </div>
+              <?php endif; ?>
+            </div>
+          </div>
+
+          <div class="row g-3 mt-0">
             <div class="col-md-6">
-              <label class="form-label">…or single SMTP account</label>
-              <select class="form-select" name="smtp_id" id="smtpSel" onchange="if(this.value)grpSel.value=''">
-                <option value="">— none —</option>
-                <?php foreach ($accounts as $a): ?><option value="<?= (int) $a['id'] ?>" <?= (int) ($campaign['smtp_id'] ?? 0) === (int) $a['id'] ? 'selected' : '' ?>><?= e($a['label']) ?></option><?php endforeach; ?>
-              </select>
+              <label class="form-label">Reply-To <span class="text-muted small">(optional)</span></label>
+              <?php if (!empty($replyIds)): ?>
+                <select class="form-select mb-2" id="replyPick" onchange="document.getElementById('replyTo').value=this.value">
+                  <option value="">— choose a saved Reply ID, or type below —</option>
+                  <?php foreach ($replyIds as $r): ?><option value="<?= e($r['email']) ?>"><?= e($r['label'] ?: $r['email']) ?> (<?= e($r['email']) ?>)</option><?php endforeach; ?>
+                </select>
+              <?php endif; ?>
+              <input type="email" class="form-control" name="reply_to" id="replyTo" value="<?= e($campaign['reply_to'] ?? '') ?>" placeholder="Defaults to From email if left blank">
             </div>
           </div>
         </div>
@@ -272,6 +404,31 @@
 </form>
 
 <script>
+// Fill Sending Domain / From name / From email from a saved sender pick.
+function applySender(select) {
+  const opt = select.selectedOptions[0];
+  if (!opt || !opt.dataset.email) return;
+  const domainSel = document.getElementById('domainSel');
+  const fromName = document.getElementById('fromName');
+  const fromEmail = document.getElementById('fromEmail');
+  if (domainSel) domainSel.value = opt.dataset.domainId;
+  if (fromName) fromName.value = opt.dataset.name;
+  if (fromEmail) fromEmail.value = opt.dataset.email;
+}
+
+// Keep "From email"'s domain part in sync with the selected Sending Domain.
+(function () {
+  const domainSel = document.getElementById('domainSel');
+  const fromEmail = document.getElementById('fromEmail');
+  if (!domainSel || !fromEmail) return;
+  domainSel.addEventListener('change', function () {
+    const domain = this.selectedOptions[0]?.dataset.domain || '';
+    if (!domain) return;
+    const local = (fromEmail.value.split('@')[0] || 'campaigns').trim() || 'campaigns';
+    fromEmail.value = local + '@' + domain;
+  });
+})();
+
 let currentStep = 0;
 const totalSteps = 5;
 function goStep(n){
@@ -346,16 +503,30 @@ function wrapSel(open, close){
   ta.dispatchEvent(new Event('input'));
 }
 const TEMPLATES = <?= js(array_map(fn($t) => ['id'=>(int)$t['id'],'subject'=>$t['subject'],'body'=>$t['body_html']], $templates)) ?>;
+// ---- Send via toggle (Sending Domain vs SMTP Account) ----
+(function(){
+  var viaInput = document.getElementById('sendVia');
+  if (!viaInput) return;
+  function setVia(via){
+    viaInput.value = via;
+    document.querySelectorAll('.src-opt[data-send]').forEach(function(b){ b.classList.toggle('active', b.dataset.send === via); });
+    document.querySelectorAll('[data-send-panel]').forEach(function(p){ p.classList.toggle('d-none', p.dataset.sendPanel !== via); });
+  }
+  document.querySelectorAll('.src-opt[data-send]').forEach(function(b){
+    b.addEventListener('click', function(){ setVia(b.dataset.send); });
+  });
+})();
+
 // ---- Recipient source toggle (Contact list vs Google Sheet) ----
 (function(){
   var typeInput = document.getElementById('sourceType');
   if (!typeInput) return;
   function setSource(src){
     typeInput.value = src;
-    document.querySelectorAll('.src-opt').forEach(function(b){ b.classList.toggle('active', b.dataset.src === src); });
+    document.querySelectorAll('.src-opt[data-src]').forEach(function(b){ b.classList.toggle('active', b.dataset.src === src); });
     document.querySelectorAll('[data-src-panel]').forEach(function(p){ p.classList.toggle('d-none', p.dataset.srcPanel !== src); });
   }
-  document.querySelectorAll('.src-opt').forEach(function(b){
+  document.querySelectorAll('.src-opt[data-src]').forEach(function(b){
     b.addEventListener('click', function(){ setSource(b.dataset.src); });
   });
 

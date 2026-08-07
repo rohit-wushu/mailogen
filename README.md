@@ -97,7 +97,9 @@ emailer-tool/
    ```
    */5  * * * *  php /home/USER/domains/yourdomain.com/emailer-tool/cron/send-emails.php
    */15 * * * *  php /home/USER/domains/yourdomain.com/emailer-tool/cron/automations.php
+   */15 * * * *  php /home/USER/domains/yourdomain.com/emailer-tool/cron/ab-test.php
    */30 * * * *  php /home/USER/domains/yourdomain.com/emailer-tool/cron/bounces.php
+   0    3 * * *  php /home/USER/domains/yourdomain.com/emailer-tool/cron/warmup.php
    ```
    (`bounces.php` is optional — it reads the mailbox you configure under
    Settings → Inbox to auto-suppress bounces and detect replies. Needs the

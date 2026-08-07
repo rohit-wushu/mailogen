@@ -16,11 +16,12 @@ final class Billing
     {
         static $free = null;
         if ($free === null) {
-            $stmt = db()->prepare('SELECT * FROM plans ORDER BY price_monthly ASC, id ASC LIMIT 1');
+            $stmt = db()->prepare('SELECT * FROM plans ORDER BY price_smtp ASC, id ASC LIMIT 1');
             $stmt->execute();
             $free = $stmt->fetch() ?: [
-                'id' => 0, 'name' => 'Starter', 'slug' => 'starter', 'price_monthly' => 0,
-                'max_contacts' => 1000, 'max_campaigns' => 10, 'max_smtp' => 1, 'monthly_emails' => 5000,
+                'id' => 0, 'name' => 'Starter', 'slug' => 'starter',
+                'price_monthly' => 0, 'price_smtp' => 0, 'price_domain' => 0,
+                'max_contacts' => 1000, 'max_campaigns' => 10, 'max_smtp' => 1, 'monthly_emails' => 1000,
             ];
         }
         return $free;
@@ -38,16 +39,21 @@ final class Billing
         return strtotime((string) $user['plan_expires_at']) >= time();
     }
 
-    /** The plan whose LIMITS currently apply to this user. */
+    /**
+     * The plan whose LIMITS currently apply to this user. `price_monthly` on
+     * the returned array is normalized to what THIS user actually pays (their
+     * chosen sending_mode), so every existing caller that reads price_monthly
+     * off an effectivePlan() result keeps working without changes.
+     */
     public static function effectivePlan(array $user): array
     {
+        $plan = null;
         if (self::isActive($user) && !empty($user['plan_id'])) {
             $plan = Plan::find((int) $user['plan_id']);
-            if ($plan) {
-                return $plan;
-            }
         }
-        return self::freePlan();
+        $plan = $plan ?: self::freePlan();
+        $plan['price_monthly'] = Plan::priceFor($plan, (string) ($user['sending_mode'] ?? 'smtp'));
+        return $plan;
     }
 
     /**

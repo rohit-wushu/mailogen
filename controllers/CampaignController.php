@@ -18,15 +18,21 @@ final class CampaignController extends BaseController
         $id = int_input('id');
         $campaign = $id ? Campaign::findForUser($id, $this->uid()) : null;
 
+        $domains = array_values(array_filter(Domain::allForUser($this->uid()), static fn ($d) => (int) $d['is_verified'] === 1));
+
         $this->render('campaigns/edit', [
-            'campaign'  => $campaign,
-            'lists'     => ContactList::withCounts($this->uid()),
-            'groups'    => SmtpGroup::withCounts($this->uid()),
-            'accounts'  => SmtpAccount::allForUser($this->uid()),
-            'templates' => Template::allForUser($this->uid()),
-            'sectors'   => Contact::sectors($this->uid()),
-            'locations' => Contact::locations($this->uid()),
-            'schedules' => $campaign ? CampaignSchedule::forCampaign((int) $campaign['id']) : [],
+            'campaign'     => $campaign,
+            'lists'        => ContactList::withCounts($this->uid()),
+            'domains'      => $domains,
+            'sesConnected' => (bool) SesConnection::platform(),
+            'senders'      => Sender::withDomain($this->uid()),
+            'replyIds'     => ReplyId::allForUser($this->uid(), 'is_default DESC, created_at DESC'),
+            'groups'       => SmtpGroup::withCounts($this->uid()),
+            'accounts'     => SmtpAccount::allForUser($this->uid()),
+            'templates'    => Template::allForUser($this->uid()),
+            'sectors'      => Contact::sectors($this->uid()),
+            'locations'    => Contact::locations($this->uid()),
+            'schedules'    => $campaign ? CampaignSchedule::forCampaign((int) $campaign['id']) : [],
         ], $campaign ? 'Edit Campaign' : 'New Campaign');
     }
 
@@ -48,6 +54,48 @@ final class CampaignController extends BaseController
             $this->back('campaigns/edit');
         }
 
+        // Sending method: a verified Sending Domain (via the account's Amazon
+        // SES connection) or a classic SMTP account/group — pick one per
+        // campaign. Selecting one clears the other so they never both apply.
+        $sendVia = str_input('send_via') === 'smtp' ? 'smtp' : 'domain';
+
+        // Domain (Amazon SES) sending is a paid-plan-dependent choice made in
+        // Settings — SMTP-mode accounts can't send this way even if they pick
+        // it in the form (defense in depth against a tampered request).
+        if ($sendVia === 'domain' && ($this->user['sending_mode'] ?? 'smtp') !== 'domain') {
+            flash('error', 'Domain-based (Amazon SES) sending isn\'t enabled for your account. Switch to it from Settings first.');
+            $this->back('campaigns/edit');
+        }
+
+        $domainId = $fromEmail = $fromName = null;
+        $smtpGroupId = $smtpId = null;
+
+        if ($sendVia === 'domain') {
+            $domainId  = int_input('domain_id') ?: null;
+            $fromEmail = strtolower(trim((string) input('from_email', ''))) ?: null;
+            $fromName  = str_input('from_name') ?: null;
+            if ($domainId) {
+                $domain = Domain::findForUser($domainId, $this->uid());
+                if (!$domain || (int) $domain['is_verified'] !== 1) {
+                    flash('error', 'Select a verified Sending Domain.');
+                    $this->back('campaigns/edit');
+                }
+                if ($fromEmail && !str_ends_with($fromEmail, '@' . $domain['domain'])) {
+                    flash('error', 'From email must be on the selected domain (@' . $domain['domain'] . ').');
+                    $this->back('campaigns/edit');
+                }
+            }
+        } else {
+            $smtpGroupId = int_input('smtp_group_id') ?: null;
+            $smtpId      = int_input('smtp_id') ?: null;
+        }
+
+        $replyTo = strtolower(trim((string) input('reply_to', ''))) ?: null;
+        if ($replyTo && !filter_var($replyTo, FILTER_VALIDATE_EMAIL)) {
+            flash('error', 'Reply-To must be a valid email address.');
+            $this->back('campaigns/edit');
+        }
+
         $data = [
             'name'             => $name,
             'source_type'      => $sourceType,
@@ -55,8 +103,12 @@ final class CampaignController extends BaseController
             'list_id'          => $sourceType === 'sheet' ? null : (int_input('list_id') ?: null),
             'sector'           => str_input('sector') ?: null,
             'location'         => str_input('location') ?: null,
-            'smtp_group_id'    => int_input('smtp_group_id') ?: null,
-            'smtp_id'          => int_input('smtp_id') ?: null,
+            'domain_id'        => $domainId,
+            'from_name'        => $fromName,
+            'from_email'       => $fromEmail,
+            'reply_to'         => $replyTo,
+            'smtp_group_id'    => $smtpGroupId,
+            'smtp_id'          => $smtpId,
             'template_id'      => int_input('template_id') ?: null,
             'subject'          => str_input('subject'),
             'body_html'        => (string) input('body_html', ''),
@@ -67,7 +119,23 @@ final class CampaignController extends BaseController
         ];
 
         $id = int_input('id');
-        if ($id && Campaign::findForUser($id, $this->uid())) {
+        $existing = $id ? Campaign::findForUser($id, $this->uid()) : null;
+
+        // A/B subject test — once a winner is decided the test is historical
+        // record, not editable (holdout has already gone out with the winner).
+        if (!$existing || empty($existing['ab_winner'])) {
+            if (input('ab_enabled') && str_input('ab_subject_b') !== '') {
+                $data['ab_subject_b']  = str_input('ab_subject_b');
+                $data['ab_test_pct']   = max(2, min(90, int_input('ab_test_pct', 20)));
+                $data['ab_test_hours'] = max(1, min(72, int_input('ab_test_hours', 4)));
+            } else {
+                $data['ab_subject_b']  = null;
+                $data['ab_test_pct']   = null;
+                $data['ab_test_hours'] = null;
+            }
+        }
+
+        if ($existing) {
             Campaign::update($id, $data);
         } else {
             if (!Billing::canCreateCampaign($this->user)) {
@@ -223,9 +291,25 @@ final class CampaignController extends BaseController
         $capped = count($valid) > $maxRecipients;
         $valid  = array_slice($valid, 0, $maxRecipients);
 
-        $candidates = SmtpRotator::candidates($campaign, $this->uid(), 0);
-        if ($candidates === []) {
-            json_response(['ok' => false, 'error' => 'No SMTP account available. Add and enable one first.']);
+        // Domain-based campaigns send via the account's Amazon SES connection;
+        // legacy campaigns still resolve an SMTP account/group.
+        $domainId = (int) ($campaign['domain_id'] ?? 0);
+        $candidates = $sesDomain = $sesConn = null;
+        if ($domainId) {
+            $sesDomain = Domain::findForUser($domainId, $this->uid());
+            if (!$sesDomain || (int) $sesDomain['is_verified'] !== 1) {
+                json_response(['ok' => false, 'error' => "This campaign's Sending Domain is not verified."]);
+            }
+            $sesConnRow = SesConnection::platform();
+            if (!$sesConnRow) {
+                json_response(['ok' => false, 'error' => 'Amazon SES is not connected on this platform yet. Contact your administrator.']);
+            }
+            $sesConn = SesConnection::credentials($sesConnRow);
+        } else {
+            $candidates = SmtpRotator::candidates($campaign, $this->uid(), 0);
+            if ($candidates === []) {
+                json_response(['ok' => false, 'error' => 'No SMTP account available. Add and enable one first.']);
+            }
         }
 
         // Base merge sample. For a Google Sheet campaign, use the first real row
@@ -259,7 +343,13 @@ final class CampaignController extends BaseController
                 false,
                 $org
             );
-            $res = Mailer::sendNow($candidates[0], $to, render_placeholders($subject, $sample), $html, $inline);
+            if ($domainId) {
+                $fromEmail = (string) ($campaign['from_email'] ?: ('no-reply@' . $sesDomain['domain']));
+                $fromName  = (string) ($campaign['from_name'] ?: APP_NAME);
+                $res = Mailer::sendNowSes($sesConn, $sesDomain, $fromEmail, $fromName, $to, render_placeholders($subject, $sample), $html, $inline);
+            } else {
+                $res = Mailer::sendNow($candidates[0], $to, render_placeholders($subject, $sample), $html, $inline);
+            }
             if ($res['ok']) {
                 $sent[] = $to;
             } else {
@@ -292,8 +382,14 @@ final class CampaignController extends BaseController
         }
         Campaign::update((int) $campaign['id'], ['scheduled_at' => null]);
         $campaign['scheduled_at'] = null;
+        $hadDomain = !empty($campaign['domain_id']);
         $count = CampaignBuilder::enqueue($campaign);
-        flash('success', "Campaign launched - {$count} emails queued. The cron worker will start sending shortly.");
+        $upgraded = !$hadDomain && !empty(Campaign::find((int) $campaign['id'])['domain_id']);
+        $msg = "Campaign launched - {$count} emails queued. The cron worker will start sending shortly.";
+        if ($upgraded) {
+            $msg .= " This campaign's recipient count is over your account's SMTP comfort zone, so we've automatically switched you to our managed sending infrastructure for better deliverability — you can switch back anytime in Settings.";
+        }
+        flash('success', $msg);
         redirect('campaigns/show?id=' . $campaign['id']);
     }
 
@@ -427,7 +523,17 @@ final class CampaignController extends BaseController
             }
             $need = count($audience);
         }
-        if (SmtpRotator::candidates($campaign, $this->uid(), 0) === []) {
+        if (!empty($campaign['domain_id'])) {
+            $domain = Domain::findForUser((int) $campaign['domain_id'], $this->uid());
+            if (!$domain || (int) $domain['is_verified'] !== 1) {
+                flash('error', 'This campaign\'s Sending Domain is not verified.');
+                return false;
+            }
+            if (!SesConnection::platform()) {
+                flash('error', 'Amazon SES is not connected on this platform yet. Contact your administrator.');
+                return false;
+            }
+        } elseif (SmtpRotator::candidates($campaign, $this->uid(), 0) === []) {
             flash('error', 'No enabled SMTP account available for sending.');
             return false;
         }

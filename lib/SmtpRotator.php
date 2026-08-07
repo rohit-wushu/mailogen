@@ -29,7 +29,7 @@ final class SmtpRotator
         // Explicit single SMTP account.
         if ($singleId) {
             $acc = SmtpAccount::find((int) $singleId);
-            return ($acc && (int) $acc['is_enabled'] === 1) ? [$acc] : [];
+            return ($acc && SmtpAccount::isSendable($acc)) ? [$acc] : [];
         }
 
         // A rotation group.

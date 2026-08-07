@@ -130,6 +130,10 @@ define('BATCH_SIZE', 25);          // emails processed per cron run
 define('MAX_ATTEMPTS', 3);         // retries before marking failed
 define('SEND_DELAY_MS', 250);      // micro-delay between sends (ms)
 
+// Google Sign-In (OAuth 2.0) - optional, blank disables the button.
+define('GOOGLE_CLIENT_ID', getenv('GOOGLE_CLIENT_ID') ?: '');
+define('GOOGLE_CLIENT_SECRET', getenv('GOOGLE_CLIENT_SECRET') ?: '');
+
 if (APP_ENV === 'development') {
     error_reporting(E_ALL);
     ini_set('display_errors', '1');
@@ -148,9 +152,20 @@ PHP;
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Install · Eventogen Mailer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-<style>body{background:linear-gradient(135deg,#4f46e5,#7c3aed);min-height:100vh}</style>
+<style>
+  :root { --brand: #6d5efc; --brand-600: #5b4ee8; }
+  body { font-family: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(135deg, #6d5efc 0%, #8b5cf6 55%, #a855f7 100%); min-height: 100vh; }
+  .card { border: 0; border-radius: 16px; }
+  .btn-primary { background: var(--brand); border-color: var(--brand); }
+  .btn-primary:hover { background: var(--brand-600); border-color: var(--brand-600); }
+  .form-control:focus { border-color: var(--brand); box-shadow: 0 0 0 .25rem rgba(109,94,252,.18); }
+  a { color: var(--brand); }
+</style>
 </head>
 <body class="py-5">
 <div class="container" style="max-width:680px">

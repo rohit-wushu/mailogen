@@ -22,6 +22,7 @@ final class SmtpGroup extends Model
         $stmt = db()->prepare(
             "SELECT * FROM smtp_accounts
              WHERE group_id = ? AND is_enabled = 1 AND sent_today < daily_limit
+               AND (domain_id IS NULL OR domain_id IN (SELECT id FROM domains WHERE is_verified = 1))
              ORDER BY priority ASC, id ASC"
         );
         $stmt->execute([$groupId]);

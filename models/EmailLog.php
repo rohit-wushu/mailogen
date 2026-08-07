@@ -19,4 +19,17 @@ final class EmailLog extends Model
         $stmt->execute([$userId]);
         return $stmt->fetchAll();
     }
+
+    /** Most recent bounce/complaint events across every tenant, for the admin Deliverability page. */
+    public static function recentBounceComplaint(int $limit = 30): array
+    {
+        $stmt = db()->query(
+            "SELECT el.*, u.name AS user_name, u.email AS user_email
+             FROM email_logs el
+             JOIN users u ON u.id = el.user_id
+             WHERE el.event IN ('bounced','complained')
+             ORDER BY el.id DESC LIMIT " . (int) $limit
+        );
+        return $stmt->fetchAll();
+    }
 }

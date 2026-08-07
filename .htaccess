@@ -15,6 +15,9 @@
 
     # If the docroot is the project root, serve real files/directories that
     # live under public/ (assets, uploads, tracking pixels, install) directly.
+    # Skip this for the bare root ($1 empty) so it reaches the front
+    # controller instead of Apache's directory index for public/.
+    RewriteCond $1 !^$
     RewriteCond %{DOCUMENT_ROOT}/mailogen/public/$1 -f [OR]
     RewriteCond %{DOCUMENT_ROOT}/mailogen/public/$1 -d
     RewriteRule ^(.*)$ public/$1 [L]

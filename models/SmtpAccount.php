@@ -17,10 +17,26 @@ final class SmtpAccount extends Model
         $stmt = db()->prepare(
             "SELECT * FROM smtp_accounts
              WHERE user_id = ? AND is_enabled = 1 AND sent_today < daily_limit
+               AND (domain_id IS NULL OR domain_id IN (SELECT id FROM domains WHERE is_verified = 1))
              ORDER BY priority ASC, id ASC"
         );
         $stmt->execute([$userId]);
         return $stmt->fetchAll();
+    }
+
+    /** True if this account is enabled, under quota, and (when linked) its domain is verified. */
+    public static function isSendable(array $account): bool
+    {
+        if ((int) $account['is_enabled'] !== 1 || (int) $account['sent_today'] >= (int) $account['daily_limit']) {
+            return false;
+        }
+        if (empty($account['domain_id'])) {
+            return true;
+        }
+        $stmt = db()->prepare('SELECT is_verified FROM domains WHERE id = ? LIMIT 1');
+        $stmt->execute([(int) $account['domain_id']]);
+        $row = $stmt->fetch();
+        return $row !== false && (int) $row['is_verified'] === 1;
     }
 
     /** Reset daily counters when the date rolls over (also run by cron). */

@@ -25,7 +25,7 @@ $faqs = [
 ];
 ?>
 <!doctype html>
-<html lang="en" data-bs-theme="light">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -33,6 +33,7 @@ $faqs = [
   <meta name="description" content="<?= e(Site::metaDescription() ?: (Site::name() . ' is an approachable, self-hosted email marketing & automation platform that sends through your own SMTP accounts — campaigns, Google Sheets mail-merge, rotation, tracking and automation.')) ?>">
   <?php if ($__k = Site::metaKeywords()): ?><meta name="keywords" content="<?= e($__k) ?>"><?php endif; ?>
   <link rel="icon" href="<?= e(Site::faviconUrl()) ?>">
+  <script>(function(){var t=localStorage.getItem('mg-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-bs-theme',t);})();</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -44,10 +45,17 @@ $faqs = [
       --ink:#0a2540; --muted:#51647a; --line:#e6ebf0;
       --yellow:#ffd34e; --pink:#ffe3ec; --blue:#e6f0ff; --sun:#fff6df;
       --dark:#0b1224; --dark-2:#141d39; --dark-line:rgba(255,255,255,.10); --dark-fg:#e8ecf7; --dark-muted:#9aa6c4;
+      --page-bg:#fff; --surface:#fff; --surface2:#fbfdfe;
+    }
+    html[data-bs-theme="dark"]{
+      --ink:#e6e9f5; --muted:#97a3c4; --line:rgba(255,255,255,.10);
+      --mint:rgba(109,94,252,.14); --mint2:rgba(139,92,246,.16);
+      --blue:rgba(37,99,235,.16); --pink:rgba(219,39,119,.16); --sun:rgba(255,211,78,.1);
+      --page-bg:#0a0f24; --surface:#131a36; --surface2:#0e1530;
     }
     *{box-sizing:border-box}
     html{scroll-behavior:smooth}
-    body{ margin:0; font-family:"Montserrat",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:#fff; overflow-x:hidden; -webkit-font-smoothing:antialiased; }
+    body{ margin:0; font-family:"Montserrat",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--page-bg); overflow-x:hidden; -webkit-font-smoothing:antialiased; transition:background .2s,color .2s; }
     a{text-decoration:none; color:inherit}
     ul{margin:0;padding:0;list-style:none}
     .wrap{max-width:1180px;margin:0 auto;padding:0 22px}
@@ -62,13 +70,15 @@ $faqs = [
     .btn-green:hover{ background:var(--green-d); color:#fff; transform:translateY(-2px); box-shadow:0 18px 30px -12px rgba(109,94,252,.9); }
     .btn-ghost{ color:var(--ink); padding:11px 18px; }
     .btn-ghost:hover{ color:var(--green); }
-    .btn-outline{ background:#fff; color:var(--ink); border-color:var(--line); padding:12px 22px; }
+    .btn-outline{ background:var(--surface); color:var(--ink); border-color:var(--line); padding:12px 22px; }
     .btn-outline:hover{ border-color:var(--green); color:var(--green); transform:translateY(-2px); }
     .btn-lg{ padding:15px 28px; font-size:1.04rem; }
 
     /* ===== Navbar ===== */
-    .lnav{ position:sticky; top:0; z-index:1030; background:rgba(255,255,255,.9); backdrop-filter:saturate(180%) blur(12px); border-bottom:1px solid transparent; transition:border-color .3s, box-shadow .3s; }
+    .lnav{ position:sticky; top:0; z-index:1030; background:rgba(255,255,255,.9); backdrop-filter:saturate(180%) blur(12px); border-bottom:1px solid transparent; transition:border-color .3s, box-shadow .3s, background .2s; }
+    html[data-bs-theme="dark"] .lnav{ background:rgba(10,15,36,.85); }
     .lnav.scrolled{ border-bottom-color:var(--line); box-shadow:0 6px 22px -18px rgba(10,37,64,.5); }
+    html[data-bs-theme="dark"] .lnav.scrolled{ box-shadow:0 6px 22px -18px rgba(0,0,0,.6); }
     .lnav .inner{ display:flex; align-items:center; gap:18px; height:74px; }
     .lbrand{ display:flex; align-items:center; gap:11px; font-weight:900; font-size:1.25rem; letter-spacing:-.02em; }
     .lbrand .logo{ width:40px;height:40px;border-radius:12px;background:var(--green);display:grid;place-items:center;color:#fff;font-size:1.15rem; }
@@ -76,14 +86,16 @@ $faqs = [
     .lmenu a{ color:var(--ink); font-weight:600; font-size:.95rem; padding:10px 15px; border-radius:9px; transition:color .15s,background .15s; }
     .lmenu a:hover{ color:var(--green); background:var(--mint); }
     .lnav .actions{ margin-left:auto; display:flex; align-items:center; gap:8px; }
-    .lburger{ display:none; margin-left:auto; border:1px solid var(--line); background:#fff; width:44px;height:44px;border-radius:12px; font-size:1.25rem; }
+    .lburger{ display:none; margin-left:auto; border:1px solid var(--line); background:var(--surface); color:var(--ink); width:44px;height:44px;border-radius:12px; font-size:1.25rem; }
+    .theme-toggle{ width:42px;height:42px;border-radius:11px;border:1px solid var(--line); background:var(--surface); color:var(--muted); display:inline-flex; align-items:center; justify-content:center; font-size:1.05rem; cursor:pointer; flex:0 0 auto; }
+    .theme-toggle:hover{ color:var(--green); }
 
     /* ===== Hero ===== */
     .hero{ position:relative; padding:70px 0 24px; background:
         radial-gradient(60% 60% at 88% 0%, var(--mint2), transparent 60%),
         radial-gradient(50% 50% at 0% 30%, var(--sun), transparent 55%); }
     .hero-grid{ display:grid; grid-template-columns:1.05fr .95fr; gap:44px; align-items:center; }
-    .badge-soft{ display:inline-flex; align-items:center; gap:8px; background:#fff; border:1px solid var(--line); color:var(--green-d); font-weight:700; font-size:.8rem; padding:7px 14px; border-radius:999px; box-shadow:0 8px 22px -16px rgba(10,37,64,.5); }
+    .badge-soft{ display:inline-flex; align-items:center; gap:8px; background:var(--surface); border:1px solid var(--line); color:var(--green-d); font-weight:700; font-size:.8rem; padding:7px 14px; border-radius:999px; box-shadow:0 8px 22px -16px rgba(10,37,64,.5); }
     .badge-soft .dot{ width:8px;height:8px;border-radius:50%;background:var(--green-l); box-shadow:0 0 0 0 rgba(139,92,246,.6); animation:pulse 2s infinite; }
     @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(139,92,246,.5)}70%{box-shadow:0 0 0 8px rgba(139,92,246,0)}100%{box-shadow:0 0 0 0 rgba(139,92,246,0)}}
     .hero h1{ font-size:clamp(1.9rem,3.4vw,2.8rem); font-weight:700; letter-spacing:-.02em; line-height:1.12; margin:20px 0 18px; }
@@ -91,7 +103,7 @@ $faqs = [
     .hero h1 .u svg{ position:absolute; left:0; right:0; bottom:-10px; width:100%; height:14px; }
     .hero .lead{ color:var(--muted); font-size:1.18rem; line-height:1.6; max-width:34ch; margin:0 0 26px; }
     .signup{ display:flex; gap:10px; flex-wrap:wrap; max-width:520px; }
-    .signup input{ flex:1; min-width:220px; border:1.6px solid var(--line); border-radius:11px; padding:14px 16px; font-size:1rem; font-family:inherit; outline:none; transition:border-color .15s, box-shadow .15s; }
+    .signup input{ flex:1; min-width:220px; border:1.6px solid var(--line); border-radius:11px; padding:14px 16px; font-size:1rem; font-family:inherit; outline:none; background:var(--surface); color:var(--ink); transition:border-color .15s, box-shadow .15s; }
     .signup input:focus{ border-color:var(--green); box-shadow:0 0 0 4px rgba(109,94,252,.14); }
     .trust-line{ display:flex; align-items:center; gap:18px; margin-top:18px; color:var(--muted); font-size:.86rem; flex-wrap:wrap; }
     .trust-line .ch{ color:var(--green); }
@@ -101,20 +113,20 @@ $faqs = [
     .hero-art{ position:relative; }
     .floaty{ animation:floaty 6s ease-in-out infinite; }
     @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
-    .card-ui{ background:#fff; border:1px solid var(--line); border-radius:18px; box-shadow:0 40px 80px -34px rgba(10,37,64,.4); overflow:hidden; }
-    .card-ui .top{ display:flex; align-items:center; gap:7px; padding:13px 16px; border-bottom:1px solid var(--line); background:#fbfdfe; }
+    .card-ui{ background:var(--surface); border:1px solid var(--line); border-radius:18px; box-shadow:0 40px 80px -34px rgba(10,37,64,.4); overflow:hidden; }
+    .card-ui .top{ display:flex; align-items:center; gap:7px; padding:13px 16px; border-bottom:1px solid var(--line); background:var(--surface2); }
     .card-ui .top i{ width:11px;height:11px;border-radius:50%; }
     .card-ui .top .t{ margin-left:8px; font-weight:700; font-size:.82rem; color:var(--muted); }
     .card-ui .pad{ padding:18px; }
     .kpis{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
-    .kpis .kpi{ border:1px solid var(--line); border-radius:13px; padding:13px; background:linear-gradient(180deg,#fff,#f8fdfb); }
+    .kpis .kpi{ border:1px solid var(--line); border-radius:13px; padding:13px; background:linear-gradient(180deg,var(--surface),var(--surface2)); }
     .kpis .v{ font-size:1.35rem; font-weight:900; letter-spacing:-.02em; color:var(--ink); }
     .kpis .l{ font-size:.7rem; color:var(--muted); }
-    .chart{ height:118px; border-radius:13px; border:1px solid var(--line); background:linear-gradient(180deg,var(--mint),#fff); position:relative; overflow:hidden; }
+    .chart{ height:118px; border-radius:13px; border:1px solid var(--line); background:linear-gradient(180deg,var(--mint),var(--surface)); position:relative; overflow:hidden; }
     .chart svg{ position:absolute; inset:0; width:100%; height:100% }
     .chart path.line{ stroke-dasharray:1400; stroke-dashoffset:1400; animation:draw 2.4s ease .4s forwards; }
     @keyframes draw{to{stroke-dashoffset:0}}
-    .chip{ position:absolute; background:#fff; border:1px solid var(--line); border-radius:13px; padding:11px 14px; box-shadow:0 20px 40px -20px rgba(10,37,64,.4); display:flex; align-items:center; gap:10px; font-weight:700; font-size:.84rem; }
+    .chip{ position:absolute; background:var(--surface); border:1px solid var(--line); border-radius:13px; padding:11px 14px; box-shadow:0 20px 40px -20px rgba(10,37,64,.4); display:flex; align-items:center; gap:10px; font-weight:700; font-size:.84rem; }
     .chip .ic{ width:32px;height:32px;border-radius:9px;display:grid;place-items:center;color:#fff;font-size:.95rem; }
     .chip.c1{ top:-18px; left:-26px; } .chip.c2{ bottom:-20px; right:-22px; }
     .chip small{ display:block; color:var(--muted); font-weight:600; font-size:.72rem; }
@@ -125,7 +137,7 @@ $faqs = [
     .marq-mask{ overflow:hidden; -webkit-mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent); mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent); }
     .marq-track{ display:flex; gap:44px; width:max-content; animation:scroll 26s linear infinite; }
     .logos:hover .marq-track{ animation-play-state:paused; }
-    .marq-item{ display:flex; align-items:center; gap:9px; color:#67768a; font-weight:800; font-size:1.02rem; white-space:nowrap; }
+    .marq-item{ display:flex; align-items:center; gap:9px; color:var(--muted); font-weight:800; font-size:1.02rem; white-space:nowrap; }
     .marq-item i{ color:var(--green); }
     @keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 
@@ -138,7 +150,7 @@ $faqs = [
 
     /* product pillars */
     .pillars{ display:grid; grid-template-columns:repeat(2,1fr); gap:22px; }
-    .pillar{ display:flex; gap:18px; padding:28px; border-radius:20px; border:1px solid var(--line); background:#fff; transition:transform .2s, box-shadow .2s; }
+    .pillar{ display:flex; gap:18px; padding:28px; border-radius:20px; border:1px solid var(--line); background:var(--surface); transition:transform .2s, box-shadow .2s; }
     .pillar:hover{ transform:translateY(-5px); box-shadow:0 28px 54px -28px rgba(10,37,64,.32); }
     .pillar .ic{ flex:0 0 58px; width:58px;height:58px;border-radius:16px;display:grid;place-items:center;font-size:1.5rem; }
     .tint-green{ background:var(--mint); color:var(--green-d); }
@@ -150,7 +162,7 @@ $faqs = [
     .pillar .more{ color:var(--green); font-weight:700; font-size:.9rem; margin-top:10px; display:inline-block; }
 
     /* feature split */
-    .bg-mint{ background:linear-gradient(180deg,var(--mint),#fff); }
+    .bg-mint{ background:linear-gradient(180deg,var(--mint),var(--page-bg)); }
     .split{ display:grid; grid-template-columns:1fr 1fr; gap:50px; align-items:center; }
     .split h2{ font-size:clamp(1.4rem,2.4vw,1.85rem); font-weight:700; letter-spacing:-.015em; margin:0 0 14px; }
     .split p.s{ color:var(--muted); font-size:1.06rem; line-height:1.65; margin:0 0 22px; }
@@ -187,7 +199,7 @@ $faqs = [
 
     /* pricing */
     .pgrid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:22px; max-width:1000px; margin:0 auto; align-items:stretch; }
-    .pcard{ position:relative; background:#fff; border:1px solid var(--line); border-radius:20px; padding:30px; display:flex; flex-direction:column; transition:transform .2s, box-shadow .2s; }
+    .pcard{ position:relative; background:var(--surface); border:1px solid var(--line); border-radius:20px; padding:30px; display:flex; flex-direction:column; transition:transform .2s, box-shadow .2s; }
     .pcard:hover{ transform:translateY(-5px); box-shadow:0 30px 56px -28px rgba(10,37,64,.3); }
     .pcard.feat{ border:2px solid var(--green); box-shadow:0 30px 60px -28px rgba(109,94,252,.5); }
     .pcard .tag{ position:absolute; top:-13px; left:50%; transform:translateX(-50%); background:var(--green); color:#fff; font-size:.72rem; font-weight:800; padding:6px 15px; border-radius:999px; }
@@ -195,10 +207,16 @@ $faqs = [
     .pcard .ptag{ color:var(--muted); font-size:.86rem; margin-bottom:14px; }
     .pcard .price{ font-size:2.3rem; font-weight:900; letter-spacing:-.02em; }
     .pcard .price small{ font-size:.85rem; font-weight:600; color:var(--muted); }
+    .pcard .price-dual{ display:flex; flex-direction:column; gap:8px; }
+    .pcard .price-row{ display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+                        background:var(--bg,rgba(0,0,0,.03)); border-radius:10px; padding:8px 12px; }
+    .pcard .price-row .lbl{ font-size:.74rem; color:var(--muted); font-weight:700; }
+    .pcard .price-row .val{ font-size:1.15rem; font-weight:900; white-space:nowrap; }
+    .pcard .price-row .val small{ font-size:.6em; font-weight:600; color:var(--muted); }
     .pcard ul{ margin:18px 0 22px; display:flex; flex-direction:column; gap:10px; }
-    .pcard li{ font-size:.9rem; color:#374151; display:flex; gap:9px; align-items:flex-start; }
+    .pcard li{ font-size:.9rem; color:var(--ink); display:flex; gap:9px; align-items:flex-start; }
     .pcard li i{ color:var(--green); margin-top:2px; }
-    .pcard li.no{ color:#9aa0b5; } .pcard li.no i{ color:#cbd1de; }
+    .pcard li.no{ color:var(--muted); } .pcard li.no i{ color:var(--line); }
     .pcard .cta-btn{ margin-top:auto; justify-content:center; }
 
     /* faq */
@@ -259,7 +277,7 @@ $faqs = [
     }
     @media (max-width:860px){
       .lmenu{ display:none; } .lburger{ display:inline-block; }
-      .lnav.open .lmenu{ display:flex; flex-direction:column; align-items:stretch; position:absolute; top:74px; left:0; right:0; background:#fff; border-bottom:1px solid var(--line); padding:10px 16px; gap:2px; box-shadow:0 20px 40px -24px rgba(10,37,64,.4); }
+      .lnav.open .lmenu{ display:flex; flex-direction:column; align-items:stretch; position:absolute; top:74px; left:0; right:0; background:var(--surface); border-bottom:1px solid var(--line); padding:10px 16px; gap:2px; box-shadow:0 20px 40px -24px rgba(10,37,64,.4); }
       .steps{ grid-template-columns:1fr; } .steps::before{ display:none; }
       .statband .row3{ grid-template-columns:1fr; }
     }
@@ -285,6 +303,7 @@ $faqs = [
       </div>
       <button class="lburger" id="lburger" aria-label="Menu"><i class="bi bi-list"></i></button>
       <div class="actions">
+        <button type="button" class="theme-toggle" id="landingThemeToggle" title="Toggle theme" aria-label="Toggle theme"><i class="bi bi-moon-stars-fill"></i></button>
         <a class="btn btn-ghost d-none-sm" href="<?= url('login') ?>">Log in</a>
         <a class="btn btn-green" href="<?= url('register') ?>">Sign up free</a>
       </div>
@@ -449,18 +468,28 @@ $faqs = [
       <div class="sec-head reveal">
         <span class="eyebrow">Simple pricing</span>
         <h2>Plans that scale with you</h2>
-        <p>Start free, upgrade when you grow. Every plan sends through your own SMTP.</p>
+        <p>Start free, upgrade when you grow. Bring your own SMTP, or let us handle delivery for you.</p>
       </div>
       <div class="pgrid">
-        <?php foreach ($plans as $i => $p): $feat = (int) ($p['is_featured'] ?? 0) === 1; $price = (float) $p['price_monthly']; ?>
+        <?php foreach ($plans as $i => $p):
+          $feat = (int) ($p['is_featured'] ?? 0) === 1;
+          $priceSmtp = (float) $p['price_smtp'];
+          $priceDom  = (float) $p['price_domain'];
+          $isFree    = $priceSmtp <= 0 && $priceDom <= 0;
+          $cur       = BILLING_CURRENCY === 'INR' ? '₹' : '$';
+        ?>
           <div class="pcard reveal d<?= $i + 1 ?> <?= $feat ? 'feat' : '' ?>">
             <?php if ($feat): ?><span class="tag">Most popular</span><?php endif; ?>
             <h3><?= e($p['name']) ?></h3>
             <div class="ptag"><?= e($p['tagline'] ?? '') ?></div>
-            <div class="price">
-              <?= $price > 0 ? e(BILLING_CURRENCY) . ' ' . number_format($price) : 'Free' ?>
-              <?php if ($price > 0): ?><small>/ <?= e($p['price_period'] ?? 'month') ?></small><?php endif; ?>
-            </div>
+            <?php if ($isFree): ?>
+              <div class="price">Free</div>
+            <?php else: ?>
+              <div class="price-dual">
+                <div class="price-row"><span class="lbl">Hosted by us</span><span class="val"><?= e($cur) ?><?= number_format($priceDom) ?><small>/<?= e($p['price_period'] ?? 'month') ?></small></span></div>
+                <div class="price-row"><span class="lbl">Own SMTP</span><span class="val"><?= e($cur) ?><?= number_format($priceSmtp) ?><small>/<?= e($p['price_period'] ?? 'month') ?></small></span></div>
+              </div>
+            <?php endif; ?>
             <ul>
               <?php foreach (array_slice(Plan::featureList($p), 0, 6) as $row): ?>
                 <li class="<?= $row['included'] ? '' : 'no' ?>">
@@ -545,6 +574,17 @@ $faqs = [
 
   <script>
   (function(){
+    var tbtn = document.getElementById('landingThemeToggle');
+    var ticon = tbtn.querySelector('i');
+    function paintTheme(t){ ticon.className = t === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-stars-fill'; }
+    paintTheme(document.documentElement.getAttribute('data-bs-theme'));
+    tbtn.addEventListener('click', function(){
+      var next = document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-bs-theme', next);
+      localStorage.setItem('mg-theme', next);
+      paintTheme(next);
+    });
+
     var nav = document.getElementById('lnav');
     var onScroll = function(){ nav.classList.toggle('scrolled', window.scrollY > 12); };
     onScroll(); window.addEventListener('scroll', onScroll, {passive:true});

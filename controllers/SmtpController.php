@@ -18,11 +18,19 @@ final class SmtpController extends BaseController
     public function index(): void
     {
         $this->requireAuth();
+        $this->requireTeamAdmin();
         $accounts = SmtpAccount::allForUser($this->uid());
         $groups   = SmtpGroup::withCounts($this->uid());
+        $domains  = Domain::allForUser($this->uid());
+        $rates = [];
+        foreach ($accounts as $a) {
+            $rates[(int) $a['id']] = Reputation::rates((int) $a['id']);
+        }
         $this->render('smtp/index', [
             'accounts' => $accounts,
             'groups'   => $groups,
+            'domains'  => $domains,
+            'rates'    => $rates,
             'presets'  => self::PRESETS,
         ], 'SMTP Accounts');
     }
@@ -30,6 +38,7 @@ final class SmtpController extends BaseController
     public function store(): void
     {
         $this->requireAuth();
+        $this->requireTeamAdmin();
         csrf_guard();
 
         $provider = str_input('provider', 'custom');
@@ -37,9 +46,15 @@ final class SmtpController extends BaseController
             $provider = 'custom';
         }
 
+        $domainId = int_input('domain_id') ?: null;
+        if ($domainId !== null && !Domain::findForUser($domainId, $this->uid())) {
+            $domainId = null;
+        }
+
         $data = [
             'user_id'    => $this->uid(),
             'group_id'   => int_input('group_id') ?: null,
+            'domain_id'  => $domainId,
             'label'      => str_input('label'),
             'provider'   => $provider,
             'host'       => str_input('host'),
@@ -50,7 +65,6 @@ final class SmtpController extends BaseController
             'from_email' => str_input('from_email'),
             'from_name'  => str_input('from_name'),
             'priority'   => int_input('priority', 10),
-            'daily_limit'=> int_input('daily_limit', 300),
             'is_enabled' => input('is_enabled') ? 1 : 1,
         ];
 
@@ -61,7 +75,25 @@ final class SmtpController extends BaseController
         }
 
         $id = int_input('id');
-        if ($id && SmtpAccount::findForUser($id, $this->uid())) {
+        $existing = $id ? SmtpAccount::findForUser($id, $this->uid()) : null;
+        $limitInput = max(1, int_input('daily_limit', 300));
+        if (input('warmup_enabled')) {
+            $data['warmup_enabled']      = 1;
+            $data['warmup_target_limit'] = $limitInput;
+            if (!$existing || (int) $existing['warmup_enabled'] !== 1) {
+                // Freshly turning warm-up on — (re)start the ramp from the low starting point.
+                $data['daily_limit']      = WarmupEngine::START_LIMIT;
+                $data['warmup_day']       = 0;
+                $data['warmup_last_step'] = null;
+            }
+            // else: already ramping — leave daily_limit/day/last_step alone, only the target moved.
+        } else {
+            $data['warmup_enabled']      = 0;
+            $data['warmup_target_limit'] = null;
+            $data['daily_limit']         = $limitInput;
+        }
+
+        if ($existing) {
             // Editing: keep existing password if left blank.
             if ((string) input('password', '') === '') {
                 unset($data['password']);
@@ -75,6 +107,7 @@ final class SmtpController extends BaseController
                 flash('error', "Your plan allows {$plan['max_smtp']} SMTP account(s). Upgrade to connect more.");
                 redirect('billing');
             }
+            $data['webhook_token'] = bin2hex(random_bytes(16));
             SmtpAccount::insert($data);
             flash('success', 'SMTP account added.');
         }
@@ -84,6 +117,7 @@ final class SmtpController extends BaseController
     public function test(): void
     {
         $this->requireAuth();
+        $this->requireTeamAdmin();
         csrf_guard();
         $id = int_input('id');
         $account = SmtpAccount::findForUser($id, $this->uid());
@@ -111,6 +145,7 @@ final class SmtpController extends BaseController
     public function testConnection(): void
     {
         $this->requireAuth();
+        $this->requireTeamAdmin();
         csrf_guard();
 
         $host = str_input('host');
@@ -157,11 +192,19 @@ final class SmtpController extends BaseController
     public function toggle(): void
     {
         $this->requireAuth();
+        $this->requireTeamAdmin();
         csrf_guard();
         $id = int_input('id');
         $account = SmtpAccount::findForUser($id, $this->uid());
         if ($account) {
-            SmtpAccount::update($id, ['is_enabled' => (int) $account['is_enabled'] === 1 ? 0 : 1]);
+            $enabling = (int) $account['is_enabled'] !== 1;
+            $update = ['is_enabled' => $enabling ? 1 : 0];
+            if ($enabling) {
+                // Manually re-enabling clears any reputation auto-pause note.
+                $update['auto_paused_at'] = null;
+                $update['pause_reason'] = null;
+            }
+            SmtpAccount::update($id, $update);
         }
         $this->back('smtp');
     }
@@ -169,10 +212,25 @@ final class SmtpController extends BaseController
     public function delete(): void
     {
         $this->requireAuth();
+        $this->requireTeamAdmin();
         csrf_guard();
         SmtpAccount::delete(int_input('id'), $this->uid());
         flash('success', 'SMTP account deleted.');
         redirect('smtp');
+    }
+
+    /** Rotate the webhook secret (e.g. if it was accidentally exposed). */
+    public function rotateWebhook(): void
+    {
+        $this->requireAuth();
+        $this->requireTeamAdmin();
+        csrf_guard();
+        $id = int_input('id');
+        if (SmtpAccount::findForUser($id, $this->uid())) {
+            SmtpAccount::update($id, ['webhook_token' => bin2hex(random_bytes(16))]);
+            flash('success', 'Webhook URL rotated — update it in your ESP\'s webhook settings.');
+        }
+        $this->back('smtp');
     }
 
     // ---- groups (rotation pools) -----------------------------------
@@ -180,6 +238,7 @@ final class SmtpController extends BaseController
     public function storeGroup(): void
     {
         $this->requireAuth();
+        $this->requireTeamAdmin();
         csrf_guard();
         $mode = str_input('rotation_mode', 'round_robin');
         if (!in_array($mode, ['round_robin', 'random', 'priority', 'failover'], true)) {
@@ -203,6 +262,7 @@ final class SmtpController extends BaseController
     public function deleteGroup(): void
     {
         $this->requireAuth();
+        $this->requireTeamAdmin();
         csrf_guard();
         SmtpGroup::delete(int_input('id'), $this->uid());
         flash('success', 'Rotation group deleted.');

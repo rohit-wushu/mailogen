@@ -13,11 +13,27 @@ $__isAdmin = ($__user['role'] ?? '') === 'admin';
 $__first = trim((string) ($__user['name'] ?? 'there'));
 $__first = explode(' ', $__first)[0] ?: 'there';
 
-$nav = static function (string $route, string $label, string $icon) use ($__route): string {
-    $active = ($__route === $route || str_starts_with($__route, $route . '/')) ? ' active' : '';
-    return '<a class="nav-link' . $active . '" href="' . url($route) . '">'
-         . '<i class="bi bi-' . $icon . '"></i><span>' . $label . '</span></a>';
+$nav = static function (string $route, string $label, string $icon, bool $sub = false, bool $exact = false, string $grad = '') use ($__route): string {
+    $active = $exact
+        ? ($__route === $route ? ' active' : '')
+        : (($__route === $route || str_starts_with($__route, $route . '/')) ? ' active' : '');
+    $icoClass = $grad !== '' ? ' nav-ico grad-' . $grad : '';
+    return '<a class="nav-link' . ($sub ? ' nav-sub' : '') . $active . '" href="' . url($route) . '">'
+         . '<i class="bi bi-' . $icon . $icoClass . '"></i><span>' . $label . '</span></a>';
 };
+$__routeIn = static function (array $routes) use ($__route): bool {
+    foreach ($routes as $r) {
+        if ($__route === $r || str_starts_with($__route, $r . '/')) {
+            return true;
+        }
+    }
+    return false;
+};
+$__audienceOpen = $__routeIn(['contacts', 'email-verifier', 'suppression']);
+$__reportsOpen  = $__routeIn(['reports', 'emails']);
+
+// Sidebar "Basic setup" progress widget (hidden once every step is done).
+$__setup = ($__user && $__user['role'] !== 'admin') ? Stats::onboardingProgress($__user) : null;
 ?><!doctype html>
 <html lang="en" data-bs-theme="<?= e($__theme) ?>">
 <head>
@@ -41,8 +57,16 @@ if (in_array($__route, ['dashboard', '', 'reports'], true)): ?>
 <?php endif; ?>
 </head>
 <body>
+<?php if (!empty($_SESSION['impersonator_id'])): ?>
+<div class="impersonate-bar">
+  <i class="bi bi-incognito"></i>
+  <span>Viewing as <strong><?= e($__user['name'] ?? '') ?></strong> (<?= e($__user['email'] ?? '') ?>) — you're signed in as this tenant.</span>
+  <a href="<?= url('admin/stop-impersonate') ?>" class="impersonate-bar-exit"><i class="bi bi-box-arrow-left"></i> Return to admin</a>
+</div>
+<?php endif; ?>
 <div class="app-shell">
   <!-- Sidebar -->
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
       <?php if (Site::showMark()): $__siteLogo = Site::logoUrl(); ?>
@@ -55,34 +79,79 @@ if (in_array($__route, ['dashboard', '', 'reports'], true)): ?>
       <?php if (Site::showName()): ?><span><?= e(Site::name()) ?></span><?php endif; ?>
     </div>
     <nav class="sidebar-nav">
-      <?= $nav('dashboard',  'Dashboard',   'house-door-fill') ?>
-      <?= $nav('contacts',   'Contacts',    'people-fill') ?>
-      <?= $nav('email-verifier', 'Email Verifier', 'patch-check-fill') ?>
-      <?= $nav('suppression','Suppression', 'slash-circle-fill') ?>
-      <?= $nav('campaigns',  'Campaigns',   'send-fill') ?>
-      <?= $nav('templates',  'Templates',   'file-richtext-fill') ?>
-      <?= $nav('automations','Automations', 'diagram-3-fill') ?>
-      <?= $nav('smtp',       'SMTP Accounts','hdd-network-fill') ?>
-      <?= $nav('emails',     'Sent Emails', 'envelope-check-fill') ?>
-      <?= $nav('reports',    'Reports',     'bar-chart-fill') ?>
-      <?= $nav('billing',    'Billing & Plans', 'credit-card-2-front-fill') ?>
-      <?= $nav('settings',   'Settings',    'gear-fill') ?>
       <?php if ($__isAdmin): ?>
-        <div class="sidebar-section">Admin</div>
-        <?= $nav('admin',       'Overview',  'pie-chart-fill') ?>
-        <?= $nav('admin/users', 'Users',     'person-badge-fill') ?>
-        <?= $nav('admin/plans', 'Plans',     'credit-card-fill') ?>
-        <?= $nav('admin/site',  'Site Settings', 'sliders') ?>
-        <?= $nav('admin/branding', 'Branding', 'palette2') ?>
+        <!-- Super admin runs the platform, not a tenant workspace — this nav
+             is intentionally limited to platform-management pages only. -->
+        <?= $nav('admin',       'Overview',  'pie-chart-fill', false, true, 'blue') ?>
+        <?= $nav('admin/users', 'Companies / Workspaces', 'buildings-fill', false, false, 'teal') ?>
+        <?= $nav('admin/plans', 'Plans',     'credit-card-fill', false, false, 'orange') ?>
         <?php $__pendingReq = PlanRequest::countPending();
           $__rActive = ($__route === 'admin/requests' || str_starts_with($__route, 'admin/requests/')) ? ' active' : ''; ?>
         <a class="nav-link<?= $__rActive ?>" href="<?= url('admin/requests') ?>">
-          <i class="bi bi-bell-fill"></i><span>Requests</span>
+          <i class="bi bi-bell-fill nav-ico grad-red"></i><span>Requests</span>
           <?php if ($__pendingReq > 0): ?><span class="badge bg-danger rounded-pill ms-auto"><?= $__pendingReq ?></span><?php endif; ?>
         </a>
-        <?= $nav('admin/logs',  'System Logs','journal-text') ?>
+        <?= $nav('admin/ses', 'Amazon SES', 'cloud-arrow-up', false, false, 'red') ?>
+        <?= $nav('admin/deliverability', 'Deliverability', 'activity', false, false, 'orange') ?>
+        <?= $nav('admin/suppression', 'Global Suppression', 'slash-circle-fill', false, false, 'teal') ?>
+        <div class="sidebar-section">Platform</div>
+        <?= $nav('admin/site',  'Site Settings', 'sliders', false, false, 'sky') ?>
+        <?= $nav('admin/branding', 'Branding', 'palette2', false, false, 'green') ?>
+        <?= $nav('admin/logs',  'System Logs','journal-text', false, false, 'violet') ?>
+      <?php else: ?>
+      <?= $nav('dashboard',  'Dashboard',   'grid-1x2-fill', false, false, 'violet') ?>
+
+      <!-- Below this point, items follow the "Basic setup" checklist order:
+           sending setup -> contacts -> mailing address -> campaign -> send. -->
+      <?php if (($__user['team_role'] ?? 'owner') !== 'member'): ?>
+      <?= $nav('domains',    'Authentication','patch-check', false, false, 'green') ?>
+      <?= $nav('smtp',       'SMTP Accounts','hdd-network-fill', false, false, 'red') ?>
+      <?php endif; ?>
+
+      <div class="nav-group<?= $__audienceOpen ? ' open' : '' ?>">
+        <button type="button" class="nav-link nav-group-toggle" data-nav-group="audience">
+          <i class="bi bi-people-fill nav-ico grad-teal"></i><span>Audience</span><i class="bi bi-chevron-down chev"></i>
+        </button>
+        <div class="nav-group-body" id="navGroupAudience">
+          <?= $nav('contacts',       'Contacts',       'person-lines-fill', true, true) ?>
+          <?= $nav('contacts/lists', 'Contact Lists',  'collection-fill',   true) ?>
+          <?= $nav('email-verifier', 'Email Verifier', 'patch-check-fill',  true) ?>
+          <?= $nav('suppression',    'Suppression',    'slash-circle-fill', true) ?>
+        </div>
+      </div>
+
+      <?= $nav('settings',   'Settings',    'gear-fill', false, false, 'pink') ?>
+      <?= $nav('campaigns',  'Campaigns',   'send-fill', false, false, 'pink') ?>
+
+      <?= $nav('templates',  'Templates',   'file-richtext-fill', false, false, 'orange') ?>
+      <?= $nav('automations','Automations', 'diagram-3-fill', false, false, 'blue') ?>
+
+      <div class="nav-group<?= $__reportsOpen ? ' open' : '' ?>">
+        <button type="button" class="nav-link nav-group-toggle" data-nav-group="reports">
+          <i class="bi bi-bar-chart-fill nav-ico grad-sky"></i><span>Reports</span><i class="bi bi-chevron-down chev"></i>
+        </button>
+        <div class="nav-group-body" id="navGroupReports">
+          <?= $nav('reports', 'Campaign Reports', 'graph-up-arrow',      true) ?>
+          <?= $nav('emails',  'Sent Emails',      'envelope-check-fill', true) ?>
+        </div>
+      </div>
+
+      <?= $nav('billing',    'Billing & Plans', 'credit-card-2-front-fill', false, false, 'violet') ?>
       <?php endif; ?>
     </nav>
+
+    <?php if (!$__isAdmin && $__setup && !$__setup['complete']):
+      $__nextStep = null;
+      foreach ($__setup['steps'] as $s) { if (!$s['done']) { $__nextStep = $s; break; } }
+    ?>
+    <a href="<?= url($__nextStep['url'] ?? 'dashboard') ?>" class="setup-mini">
+      <span class="setup-mini-ico"><i class="bi bi-arrow-right"></i></span>
+      <span class="setup-mini-text">
+        <span class="setup-mini-title">Basic setup</span>
+        <span class="setup-mini-sub">Set <?= $__setup['done'] ?> of <?= $__setup['total'] ?></span>
+      </span>
+    </a>
+    <?php endif; ?>
 
     <div class="sidebar-foot">
       <span><i class="bi bi-brightness-high-fill me-1"></i><span id="themeLabel"><?= $__theme === 'dark' ? 'Dark' : 'Light' ?> Mode</span></span>
@@ -109,11 +178,13 @@ if (in_array($__route, ['dashboard', '', 'reports'], true)): ?>
         <?php endif; ?>
       </div>
 
+      <?php if (!$__isAdmin): ?>
       <button type="button" class="topbar-search" id="searchTrigger" aria-label="Search (Ctrl K)">
         <i class="bi bi-search search-ico"></i>
         <span class="topbar-search-ph">Search pages and actions…</span>
         <span class="kbd"><span class="cmdk-mod">Ctrl</span> K</span>
       </button>
+      <?php endif; ?>
 
       <div class="topbar-actions">
         <button class="icon-btn" id="themeToggle" title="Toggle theme">

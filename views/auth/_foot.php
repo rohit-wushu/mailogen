@@ -17,6 +17,21 @@ document.querySelectorAll('[data-toggle-pw]').forEach(function (b) {
     b.querySelector('i').className = i.type === 'password' ? 'bi bi-eye' : 'bi bi-eye-slash';
   });
 });
+
+// Light/dark toggle (guest pages have no account yet, so persist to localStorage).
+(function () {
+  var btn = document.getElementById('authThemeToggle');
+  if (!btn) return;
+  var icon = btn.querySelector('i');
+  function paint(t) { icon.className = t === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-stars-fill'; }
+  paint(document.documentElement.getAttribute('data-bs-theme'));
+  btn.addEventListener('click', function () {
+    var next = document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-bs-theme', next);
+    localStorage.setItem('mg-theme', next);
+    paint(next);
+  });
+})();
 </script>
 </body>
 </html>

@@ -1,8 +1,10 @@
 # --- Secrets & local state (NEVER commit) ---
 config/config.php
+config/config.php.bak
 config/installed.lock
 install/installed.lock
 .env
+.claude/
 
 # --- User uploads & generated files ---
 uploads/*

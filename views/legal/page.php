@@ -1,31 +1,40 @@
 <?php /** @var string $doc @var string $docTitle */ $today = date('F j, Y'); ?>
 <!doctype html>
-<html lang="en" data-bs-theme="light">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><?= e($docTitle) ?> · <?= e(Site::name()) ?></title>
   <link rel="icon" href="<?= e(Site::faviconUrl()) ?>">
+  <script>(function(){var t=localStorage.getItem('mg-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-bs-theme',t);})();</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="<?= url('assets/css/style.css') ?>" rel="stylesheet">
   <style>
-    body{background:#f6f7fb; font-family:"Montserrat",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif} .legal{max-width:820px} .legal h2{font-size:1.15rem;margin-top:1.8rem}
-    .legal p,.legal li{color:#475067;line-height:1.7}
+    body{background:var(--bs-tertiary-bg); font-family:"Montserrat",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+    .legal{max-width:820px}
+    .legal h2{font-size:1.15rem;margin-top:1.8rem;color:var(--bs-body-color)}
+    .legal p,.legal li{color:var(--bs-secondary-color);line-height:1.7}
+    .legal-card{background:var(--bs-body-bg);border:1px solid var(--bs-border-color)}
+    .legal-nav{background:var(--bs-body-bg)}
+    .legal-brand{color:var(--bs-body-color)!important}
+    .legal-brand i{color:var(--brand)}
   </style>
 </head>
 <body>
-  <nav class="navbar bg-white border-bottom">
-    <div class="container">
-      <a class="navbar-brand fw-bold" href="<?= url('') ?>"><?php if (Site::showMark()): $__ll = Site::logoUrl(); ?><?php if ($__ll): ?><img src="<?= e($__ll) ?>" alt="<?= e(Site::name()) ?>" style="height:26px;width:auto;vertical-align:middle"> <?php else: ?><i class="bi bi-send-fill text-primary"></i> <?php endif; ?><?php endif; ?><?php if (Site::showName()): ?><?= e(Site::name()) ?><?php endif; ?></a>
-      <a class="btn btn-sm btn-outline-secondary" href="<?= url('login') ?>">Sign in</a>
+  <nav class="navbar legal-nav border-bottom">
+    <div class="container d-flex align-items-center gap-2">
+      <a class="navbar-brand fw-bold legal-brand me-auto" href="<?= url('') ?>"><?php if (Site::showMark()): $__ll = Site::logoUrl(); ?><?php if ($__ll): ?><img src="<?= e($__ll) ?>" alt="<?= e(Site::name()) ?>" style="height:26px;width:auto;vertical-align:middle"> <?php else: ?><i class="bi bi-send-fill"></i> <?php endif; ?><?php endif; ?><?php if (Site::showName()): ?><?= e(Site::name()) ?><?php endif; ?></a>
+      <button type="button" class="icon-btn" id="legalThemeToggle" title="Toggle theme" aria-label="Toggle theme"><i class="bi bi-moon-stars-fill"></i></button>
+      <a class="btn btn-sm btn-outline-primary" href="<?= url('login') ?>">Sign in</a>
     </div>
   </nav>
 
   <div class="container my-5">
-    <div class="legal mx-auto bg-white rounded-4 shadow-sm p-4 p-md-5">
+    <div class="legal legal-card mx-auto rounded-4 shadow-sm p-4 p-md-5">
       <h1 class="h3 mb-1"><?= e($docTitle) ?></h1>
       <p class="text-muted small">Last updated: <?= e($today) ?></p>
       <div class="alert alert-warning small"><i class="bi bi-exclamation-triangle"></i> This is a starter template provided for convenience. Have it reviewed by a qualified lawyer before relying on it for your business.</div>
@@ -103,5 +112,19 @@
       </div>
     </div>
   </div>
+  <script>
+    (function () {
+      var btn = document.getElementById('legalThemeToggle');
+      var icon = btn.querySelector('i');
+      function paint(t) { icon.className = t === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-stars-fill'; }
+      paint(document.documentElement.getAttribute('data-bs-theme'));
+      btn.addEventListener('click', function () {
+        var next = document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-bs-theme', next);
+        localStorage.setItem('mg-theme', next);
+        paint(next);
+      });
+    })();
+  </script>
 </body>
 </html>

@@ -15,6 +15,7 @@ final class EmailQueue extends Model
             $stmt = $pdo->prepare(
                 "SELECT id FROM email_queue
                  WHERE status = 'queued' AND (send_after IS NULL OR send_after <= NOW())
+                   AND (ab_variant IS NULL OR ab_variant IN ('a','b'))
                  ORDER BY id ASC LIMIT $limit FOR UPDATE"
             );
             $stmt->execute();
@@ -37,10 +38,10 @@ final class EmailQueue extends Model
         return $rows->fetchAll();
     }
 
-    public static function markSent(int $id, int $smtpId): void
+    public static function markSent(int $id, ?int $smtpId, ?string $sesMessageId = null): void
     {
-        db()->prepare("UPDATE email_queue SET status = 'sent', smtp_id = ?, sent_at = NOW(), error = NULL WHERE id = ?")
-            ->execute([$smtpId, $id]);
+        db()->prepare("UPDATE email_queue SET status = 'sent', smtp_id = ?, ses_message_id = ?, sent_at = NOW(), error = NULL WHERE id = ?")
+            ->execute([$smtpId, $sesMessageId, $id]);
     }
 
     public static function markFailed(int $id, string $error, bool $retry): void
@@ -56,6 +57,14 @@ final class EmailQueue extends Model
     {
         $stmt = db()->prepare('SELECT * FROM email_queue WHERE tracking_id = ? LIMIT 1');
         $stmt->execute([$trackingId]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /** Matches an inbound SES/SNS bounce or complaint notification back to the send that triggered it. */
+    public static function findBySesMessageId(string $messageId): ?array
+    {
+        $stmt = db()->prepare('SELECT * FROM email_queue WHERE ses_message_id = ? LIMIT 1');
+        $stmt->execute([$messageId]);
         return $stmt->fetch() ?: null;
     }
 
