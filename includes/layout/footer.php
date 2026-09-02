@@ -64,6 +64,6 @@ if (Auth::isAdmin()) {
   window.CSRF = <?= json_encode(csrf_token()) ?>;
   window.CMDK_ITEMS = <?= js($__cmdk) ?>;
 </script>
-<script src="<?= url('assets/js/app.js') ?>"></script>
+<script src="<?= asset_url('assets/js/app.js') ?>"></script>
 </body>
 </html>

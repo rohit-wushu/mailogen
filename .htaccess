@@ -17,9 +17,20 @@
     # live under public/ (assets, uploads, tracking pixels, install) directly.
     # Skip this for the bare root ($1 empty) so it reaches the front
     # controller instead of Apache's directory index for public/.
+    #
+    # Two self-contained blocks (not one OR-chain — mixing AND/OR flags in a
+    # single RewriteCond chain is ambiguous) so this works whichever way the
+    # project is deployed: as a subfolder under the main domain's docroot
+    # (DOCUMENT_ROOT = one level up, e.g. this local install) or as a
+    # subdomain's own docroot (DOCUMENT_ROOT = this folder itself).
     RewriteCond $1 !^$
     RewriteCond %{DOCUMENT_ROOT}/mailogen/public/$1 -f [OR]
     RewriteCond %{DOCUMENT_ROOT}/mailogen/public/$1 -d
+    RewriteRule ^(.*)$ public/$1 [L]
+
+    RewriteCond $1 !^$
+    RewriteCond %{DOCUMENT_ROOT}/public/$1 -f [OR]
+    RewriteCond %{DOCUMENT_ROOT}/public/$1 -d
     RewriteRule ^(.*)$ public/$1 [L]
 
     # Everything else -> the front controller.

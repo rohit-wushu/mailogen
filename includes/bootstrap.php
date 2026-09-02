@@ -39,6 +39,17 @@ require_once __DIR__ . '/../lib/Database.php';
 // -------------------------------------------------------------------
 if (PHP_SAPI !== 'cli') {
     set_exception_handler(static function (\Throwable $e): void {
+        // Always leave a trace in the server log — without this a production
+        // 500 is a dead end, since the page itself deliberately says nothing.
+        error_log(sprintf(
+            '[mailogen] %s: %s in %s:%d | url=%s | %s',
+            get_class($e),
+            $e->getMessage(),
+            $e->getFile(),
+            $e->getLine(),
+            $_SERVER['REQUEST_URI'] ?? 'cli',
+            $e->getTraceAsString()
+        ));
         if (!headers_sent()) {
             http_response_code(500);
         }
@@ -76,4 +87,17 @@ if (PHP_SAPI !== 'cli' && session_status() === PHP_SESSION_NONE) {
     ]);
     session_name('EVENTOGEN_SESS');
     session_start();
+}
+
+// -------------------------------------------------------------------
+//  Never let a browser or intermediary (CDN, corporate proxy...) cache a
+//  dynamic response. Every page embeds a session-specific CSRF token, so a
+//  cached copy hands out a stale token to the next visitor/tab — surfacing
+//  as spurious "invalid CSRF token" failures on forms like login/register.
+//  Static assets are served directly by the webserver and never reach this
+//  file, so this has no effect on CSS/JS/image caching.
+// -------------------------------------------------------------------
+if (PHP_SAPI !== 'cli' && !headers_sent()) {
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
 }

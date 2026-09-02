@@ -33,7 +33,7 @@ $faqs = [
   <meta name="description" content="<?= e(Site::metaDescription() ?: (Site::name() . ' is an approachable, self-hosted email marketing & automation platform that sends through your own SMTP accounts — campaigns, Google Sheets mail-merge, rotation, tracking and automation.')) ?>">
   <?php if ($__k = Site::metaKeywords()): ?><meta name="keywords" content="<?= e($__k) ?>"><?php endif; ?>
   <link rel="icon" href="<?= e(Site::faviconUrl()) ?>">
-  <script>(function(){var t=localStorage.getItem('mg-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-bs-theme',t);})();</script>
+  <script>(function(){var t=localStorage.getItem('mg-theme')||'light';document.documentElement.setAttribute('data-bs-theme',t);})();</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
