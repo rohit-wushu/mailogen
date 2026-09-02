@@ -1,4 +1,4 @@
-<?php /** @var array $campaign @var ?array $report @var array $schedules @var array $audience */
+<?php /** @var array $campaign @var ?array $report @var ?array $queueProgress @var array $schedules @var array $audience */
 $canSend = in_array($campaign['status'], ['draft', 'scheduled', 'paused'], true);
 ?>
 <div class="page-head">
@@ -100,7 +100,22 @@ $canSend = in_array($campaign['status'], ['draft', 'scheduled', 'paused'], true)
             </form>
           <?php endif; ?>
         <?php elseif ($campaign['status'] === 'running'): ?>
-          <div class="alert alert-info mb-0"><i class="bi bi-hourglass-split"></i> Sending in progress — handled by the cron worker.</div>
+          <?php
+            $qTotal = $queueProgress['total'] ?? 0;
+            $qDone  = $queueProgress['done'] ?? 0;
+            $qPct   = $qTotal > 0 ? min(100, round($qDone / $qTotal * 100)) : 0;
+          ?>
+          <div class="alert alert-info mb-0">
+            <div class="d-flex align-items-center justify-content-between mb-2">
+              <span><i class="bi bi-hourglass-split"></i> Sending in progress — handled by the cron worker.</span>
+              <span class="fw-semibold"><?= $qDone ?> / <?= $qTotal ?></span>
+            </div>
+            <div class="progress" style="height:8px">
+              <div class="progress-bar progress-bar-striped progress-bar-animated" style="width:<?= $qPct ?>%"></div>
+            </div>
+            <div class="text-muted small mt-1">This page updates itself.</div>
+          </div>
+          <script>setTimeout(function () { location.reload(); }, 8000);</script>
         <?php elseif (in_array($campaign['status'], ['completed', 'cancelled'], true)): ?>
           <div class="alert alert-<?= $campaign['status'] === 'completed' ? 'success' : 'secondary' ?> mb-3">
             <i class="bi bi-<?= $campaign['status'] === 'completed' ? 'check-circle' : 'x-circle' ?>"></i>

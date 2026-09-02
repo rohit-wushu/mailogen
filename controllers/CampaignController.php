@@ -236,6 +236,21 @@ final class CampaignController extends BaseController
             static fn ($r) => (int) $r['id'] === (int) $campaign['id']
         ));
 
+        // Real send progress from the queue itself — not total_recipients (which
+        // only reflects the latest enqueue round) or the cumulative email_logs
+        // count (which can exceed it after a resend). "done" = terminal rows
+        // (sent/failed/skipped); "total" = every row this campaign has queued.
+        $queueProgress = null;
+        if ($campaign['status'] === 'running') {
+            $stmt = db()->prepare(
+                "SELECT COUNT(*) AS total, SUM(status IN ('sent','failed','skipped')) AS done
+                 FROM email_queue WHERE campaign_id = ?"
+            );
+            $stmt->execute([(int) $campaign['id']]);
+            $row = $stmt->fetch();
+            $queueProgress = ['done' => (int) ($row['done'] ?? 0), 'total' => (int) ($row['total'] ?? 0)];
+        }
+
         $org = ['address' => $this->user['org_address'] ?? '', 'company' => $this->user['company'] ?? ''];
 
         // Resolve a recipient *preview* without side effects. For a sheet
@@ -263,6 +278,7 @@ final class CampaignController extends BaseController
         $this->render('campaigns/show', [
             'campaign'    => $campaign,
             'report'      => $report[0] ?? null,
+            'queueProgress' => $queueProgress,
             'schedules'   => CampaignSchedule::forCampaign((int) $campaign['id']),
             'audience'    => $audience,
             'sheetError'  => $sheetError,
