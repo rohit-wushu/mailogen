@@ -143,6 +143,10 @@ $sparkColors = [
         <?php else:
           $listName = [];
           foreach ($lists as $l) { $listName[(int) $l['id']] = $l['name']; }
+          // A contact can be in several lists, so pull them all in one query
+          // rather than one per row.
+          $listsByContact = ContactList::namesByContact(array_column($contacts, 'id'));
+          $listIdsByContact = ContactList::idsByContact(array_column($contacts, 'id'));
           foreach ($contacts as $c):
             $name = trim(($c['first_name'] ?? '') . ' ' . ($c['last_name'] ?? '')) ?: '—';
             $statusMap = ['active' => ['subscribed', 'Subscribed'], 'unsubscribed' => ['unsubscribed', 'Unsubscribed'], 'bounced' => ['bounced', 'Bounced']];
@@ -162,7 +166,13 @@ $sparkColors = [
                 <span class="badge bg-<?= $vcolor ?>-subtle text-<?= $vcolor ?>-emphasis text-capitalize" title="<?= e($c['verify_reason'] ?? '') ?>"><i class="bi bi-<?= $vicon ?>"></i> <?= e($vs) ?></span>
               <?php endif; ?>
             </td>
-            <td><?= isset($listName[(int) $c['list_id']]) ? e($listName[(int) $c['list_id']]) : '<span class="text-muted">—</span>' ?></td>
+            <td>
+              <?php $cLists = $listsByContact[(int) $c['id']] ?? [];
+              if (!$cLists): ?><span class="text-muted">—</span>
+              <?php else: foreach ($cLists as $ln): ?>
+                <span class="tag-pill" style="background:#eef0ff;color:#5b4ee8"><?= e($ln) ?></span>
+              <?php endforeach; endif; ?>
+            </td>
             <td>
               <?php foreach ($ctags as $i => $t):
                 $pal = ['#eef0ff:#5b4ee8', '#e9fbf3:#059669', '#fff6e8:#d97706', '#eaf3ff:#2563eb', '#fdecec:#dc2626'][$i % 5];
@@ -177,7 +187,7 @@ $sparkColors = [
               <div class="dropdown">
                 <button class="row-actions" data-bs-toggle="dropdown"><i class="bi bi-three-dots-vertical"></i></button>
                 <ul class="dropdown-menu dropdown-menu-end">
-                  <li><button class="dropdown-item" onclick='editContact(<?= json_encode($c) ?>)'><i class="bi bi-pencil me-2"></i>Edit</button></li>
+                  <li><button class="dropdown-item" onclick='editContact(<?= json_encode($c + ['list_ids' => $listIdsByContact[(int) $c['id']] ?? []]) ?>)'><i class="bi bi-pencil me-2"></i>Edit</button></li>
                   <li>
                     <form method="post" action="<?= url('contacts/delete') ?>" data-confirm="Delete this contact?">
                       <?= csrf_field() ?><input type="hidden" name="id" value="<?= (int) $c['id'] ?>">
@@ -219,8 +229,8 @@ $sparkColors = [
         <div class="col-6"><label class="form-label">Phone</label><input class="form-control" name="phone" id="c_phone"></div>
         <div class="col-6"><label class="form-label">Sector <span class="text-muted small">(segment)</span></label><input class="form-control" name="sector" id="c_sector" list="sectorList" placeholder="e.g. Healthcare"></div>
         <div class="col-6"><label class="form-label">Location <span class="text-muted small">(segment)</span></label><input class="form-control" name="location" id="c_location" list="locationList" placeholder="e.g. Mumbai"></div>
-        <div class="col-12"><label class="form-label">List</label>
-          <select class="form-select" name="list_id" id="c_list"><option value="">— none —</option>
+        <div class="col-12"><label class="form-label">Lists <span class="text-muted small">(hold ⌘/Ctrl to pick more than one)</span></label>
+          <select class="form-select" name="list_ids[]" id="c_list" multiple size="4">
             <?php foreach ($lists as $l): ?><option value="<?= (int) $l['id'] ?>"><?= e($l['name']) ?></option><?php endforeach; ?>
           </select>
         </div>
@@ -358,7 +368,9 @@ function editContact(c){
   document.getElementById('contactModalTitle').textContent='Edit contact';
   document.getElementById('contact_id').value=c.id;
   c_email.value=c.email; c_first.value=c.first_name||''; c_last.value=c.last_name||'';
-  c_company.value=c.company||''; c_phone.value=c.phone||''; c_list.value=c.list_id||''; c_sector.value=c.sector||''; c_location.value=c.location||'';
+  c_company.value=c.company||''; c_phone.value=c.phone||''; c_sector.value=c.sector||''; c_location.value=c.location||'';
+  var picked=(c.list_ids||[]).map(String);
+  Array.from(c_list.options).forEach(function(o){ o.selected = picked.indexOf(o.value) !== -1; });
   new bootstrap.Modal('#contactModal').show();
 }
 function resetListForm(){ document.getElementById('list_form_id').value=''; document.getElementById('list_name').value=''; document.getElementById('list_desc').value=''; }

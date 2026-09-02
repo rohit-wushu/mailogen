@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `onboarding_completed_at` DATETIME DEFAULT NULL,  -- NULL = new account still needs the onboarding wizard
   `plan_id`        BIGINT UNSIGNED DEFAULT NULL,
   `plan_expires_at` DATETIME       NULL DEFAULT NULL,
-  `theme`          ENUM('light','dark') NOT NULL DEFAULT 'dark',
+  `theme`          ENUM('light','dark') NOT NULL DEFAULT 'light',
   `timezone`       VARCHAR(64)     NOT NULL DEFAULT 'Asia/Kolkata',
   `imap_host`      VARCHAR(190)    DEFAULT NULL,
   `imap_port`      INT             NOT NULL DEFAULT 993,
@@ -290,6 +290,24 @@ CREATE TABLE IF NOT EXISTS `contacts` (
   KEY `idx_contacts_location` (`user_id`,`location`),
   CONSTRAINT `fk_contacts_user` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`)         ON DELETE CASCADE,
   CONSTRAINT `fk_contacts_list` FOREIGN KEY (`list_id`) REFERENCES `contact_lists`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
+--  contact_list_map  (pivot: a contact can belong to many lists)
+--
+--  Membership lives here, not in contacts.list_id — importing a sheet into
+--  one list must never pull a contact out of the lists it is already in.
+--  contacts.list_id is kept only as the legacy "first list" column for old
+--  rows; nothing reads it for membership any more.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `contact_list_map` (
+  `contact_id`     BIGINT UNSIGNED NOT NULL,
+  `list_id`        BIGINT UNSIGNED NOT NULL,
+  `added_at`       TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`contact_id`,`list_id`),
+  KEY `idx_clm_list` (`list_id`),
+  CONSTRAINT `fk_clm_contact` FOREIGN KEY (`contact_id`) REFERENCES `contacts`(`id`)      ON DELETE CASCADE,
+  CONSTRAINT `fk_clm_list`    FOREIGN KEY (`list_id`)    REFERENCES `contact_lists`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
