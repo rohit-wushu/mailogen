@@ -142,7 +142,7 @@ $sparkColors = [
             <span class="ms-auto"><?= status_badge($topCampaign['status']) ?></span>
           </div>
           <div class="row text-center g-2">
-            <?php foreach ([['Sent', (int) $topCampaign['sent_count']], ['Opens', $topCampaign['open_rate'] . '%'], ['Clicks', $topCampaign['click_rate'] . '%'], ['Clicks', (int) $topCampaign['clicks']]] as $i => [$l, $v]): ?>
+            <?php foreach ([['Sent', (int) $topCampaign['sent_count']], ['Opens', $topCampaign['open_rate'] . '%'], ['Clicks', $topCampaign['click_rate'] . '%'], ['Total Clicks', (int) $topCampaign['clicks']]] as $i => [$l, $v]): ?>
               <div class="col-3"><div class="fw-bold"><?= e((string) $v) ?></div><div class="text-muted small"><?= $l ?></div></div>
             <?php endforeach; ?>
           </div>
@@ -239,6 +239,7 @@ $sparkColors = [
   </div>
 </div>
 
+<?php if (!empty($onboarding) && $onboarding['complete']): ?>
 <script>
 const series = <?= json_encode($series) ?>;
 const eng = <?= json_encode(['opens' => (int) $stats['opens'], 'clicks' => (int) $stats['clicks'], 'unsub' => (int) $stats['unsubscribed'], 'bounced' => (int) $stats['failed']]) ?>;
@@ -263,3 +264,4 @@ new Chart(document.getElementById('engagementChart'), {
   options: { plugins: { legend: { display: false } } }
 });
 </script>
+<?php endif; ?>

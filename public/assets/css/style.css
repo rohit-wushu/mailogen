@@ -111,6 +111,10 @@ a { text-decoration: none; }
     justify-content: center; gap: 0;
   }
   .sidebar:not(:hover) .nav-group-body { display: none !important; }
+  /* A wide wordmark is 150px — twice the collapsed rail — and would be
+     centre-cropped to an unreadable slice by .sidebar-brand's overflow:hidden.
+     Shrink it to fit the rail instead so the whole mark stays legible. */
+  .sidebar:not(:hover) .sidebar-brand .brand-img { max-width: 46px; }
 }
 .sidebar-brand {
   display: flex; align-items: center; gap: 12px;
