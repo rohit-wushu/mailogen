@@ -22,18 +22,29 @@ $sparkColors = [
         <li><button class="dropdown-item" id="deepVerifyBtn"><i class="bi bi-patch-check-fill me-2 text-brand"></i>Deep verify <span class="text-muted small">(confirm mailboxes · slow)</span></button></li>
         <li><hr class="dropdown-divider"></li>
         <li class="dropdown-header small text-uppercase">Clean list</li>
+        <?php
+        // A disabled item with pointer-events:none swallows the click silently,
+        // which reads as "broken" rather than "nothing to remove". Say why.
+        $unver  = (int) ($verifyCounts['unverified'] ?? 0);
+        $whyOff = $unver > 0
+            ? 'Run "Verify emails" first — ' . number_format($unver) . ' address(es) still unchecked.'
+            : 'No invalid or risky addresses found.';
+        ?>
         <li>
           <form method="post" action="<?= url('contacts/clean-invalid') ?>" data-confirm="Permanently delete the <?= $inv ?> invalid contact(s)?">
             <?= csrf_field() ?><input type="hidden" name="scope" value="invalid">
-            <button class="dropdown-item text-danger <?= $inv === 0 ? 'disabled' : '' ?>"><i class="bi bi-patch-exclamation me-2"></i>Remove invalid<?php if ($inv): ?> <span class="badge bg-danger-subtle text-danger-emphasis ms-1"><?= $inv ?></span><?php endif; ?></button>
+            <button class="dropdown-item text-danger <?= $inv === 0 ? 'disabled' : '' ?>" <?= $inv === 0 ? 'aria-disabled="true" title="' . e($whyOff) . '"' : '' ?>><i class="bi bi-patch-exclamation me-2"></i>Remove invalid<?php if ($inv): ?> <span class="badge bg-danger-subtle text-danger-emphasis ms-1"><?= $inv ?></span><?php endif; ?></button>
           </form>
         </li>
         <li>
           <form method="post" action="<?= url('contacts/clean-invalid') ?>" data-confirm="Permanently delete the <?= $inv + $rsk ?> invalid + risky contact(s)?">
             <?= csrf_field() ?><input type="hidden" name="scope" value="both">
-            <button class="dropdown-item text-danger <?= ($inv + $rsk) === 0 ? 'disabled' : '' ?>"><i class="bi bi-trash3 me-2"></i>Remove invalid &amp; risky<?php if ($inv + $rsk): ?> <span class="badge bg-danger-subtle text-danger-emphasis ms-1"><?= $inv + $rsk ?></span><?php endif; ?></button>
+            <button class="dropdown-item text-danger <?= ($inv + $rsk) === 0 ? 'disabled' : '' ?>" <?= ($inv + $rsk) === 0 ? 'aria-disabled="true" title="' . e($whyOff) . '"' : '' ?>><i class="bi bi-trash3 me-2"></i>Remove invalid &amp; risky<?php if ($inv + $rsk): ?> <span class="badge bg-danger-subtle text-danger-emphasis ms-1"><?= $inv + $rsk ?></span><?php endif; ?></button>
           </form>
         </li>
+        <?php if ($inv + $rsk === 0): ?>
+          <li><div class="px-3 pb-2 text-muted small" style="max-width:260px"><?= e($whyOff) ?></div></li>
+        <?php endif; ?>
         <li><hr class="dropdown-divider"></li>
         <li>
           <form method="post" action="<?= url('contacts/dedupe') ?>" data-confirm="Remove duplicate contacts with the same email? The oldest copy of each is kept.">
@@ -229,10 +240,20 @@ $sparkColors = [
         <div class="col-6"><label class="form-label">Phone</label><input class="form-control" name="phone" id="c_phone"></div>
         <div class="col-6"><label class="form-label">Sector <span class="text-muted small">(segment)</span></label><input class="form-control" name="sector" id="c_sector" list="sectorList" placeholder="e.g. Healthcare"></div>
         <div class="col-6"><label class="form-label">Location <span class="text-muted small">(segment)</span></label><input class="form-control" name="location" id="c_location" list="locationList" placeholder="e.g. Mumbai"></div>
-        <div class="col-12"><label class="form-label">Lists <span class="text-muted small">(hold ⌘/Ctrl to pick more than one)</span></label>
-          <select class="form-select" name="list_ids[]" id="c_list" multiple size="4">
-            <?php foreach ($lists as $l): ?><option value="<?= (int) $l['id'] ?>"><?= e($l['name']) ?></option><?php endforeach; ?>
-          </select>
+        <div class="col-12"><label class="form-label">Lists <span class="text-muted small">(pick any number)</span></label>
+          <?php if (!$lists): ?>
+            <div class="form-text">No lists yet — <a href="<?= url('contacts/lists') ?>">create one</a> to group contacts.</div>
+          <?php else: ?>
+            <div id="c_list" class="border rounded-3 p-2" style="max-height:150px;overflow-y:auto">
+              <?php foreach ($lists as $l): ?>
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="list_ids[]"
+                         value="<?= (int) $l['id'] ?>" id="c_list_<?= (int) $l['id'] ?>">
+                  <label class="form-check-label" for="c_list_<?= (int) $l['id'] ?>"><?= e($l['name']) ?></label>
+                </div>
+              <?php endforeach; ?>
+            </div>
+          <?php endif; ?>
         </div>
       </div>
       <div class="modal-footer"><button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary">Save</button></div>
@@ -370,7 +391,9 @@ function editContact(c){
   c_email.value=c.email; c_first.value=c.first_name||''; c_last.value=c.last_name||'';
   c_company.value=c.company||''; c_phone.value=c.phone||''; c_sector.value=c.sector||''; c_location.value=c.location||'';
   var picked=(c.list_ids||[]).map(String);
-  Array.from(c_list.options).forEach(function(o){ o.selected = picked.indexOf(o.value) !== -1; });
+  document.querySelectorAll('#contactModal input[name="list_ids[]"]').forEach(function(cb){
+    cb.checked = picked.indexOf(cb.value) !== -1;
+  });
   new bootstrap.Modal('#contactModal').show();
 }
 function resetListForm(){ document.getElementById('list_form_id').value=''; document.getElementById('list_name').value=''; document.getElementById('list_desc').value=''; }
