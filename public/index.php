@@ -92,6 +92,7 @@ $router->add('contacts/verify',      'ContactController', 'verify');
 $router->add('contacts/verify-reset','ContactController', 'verifyReset');
 $router->add('contacts/verify-one',  'ContactController', 'verifyOne');
 $router->add('contacts/import',      'ContactController', 'import');
+$router->add('contacts/export',      'ContactController', 'export');
 $router->add('contacts/lists',       'ContactController', 'lists');
 $router->add('contacts/list/store',  'ContactController', 'storeList');
 $router->add('contacts/list/delete', 'ContactController', 'deleteList');

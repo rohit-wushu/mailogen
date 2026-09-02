@@ -159,6 +159,91 @@ final class ContactController extends BaseController
     }
 
     /**
+     * Stream the current filtered view out as CSV — the same list / status /
+     * verification / sector / location / search filters the page is showing,
+     * so "export this list" and "export only what verified clean" both fall
+     * out of the filters the user already set.
+     *
+     * Rows are fetched in batches and flushed as they go: a tenant with tens
+     * of thousands of contacts would otherwise build the whole file in memory.
+     */
+    public function export(): void
+    {
+        $this->requireAuth();
+        $uid = $this->uid();
+
+        $opts = [
+            'q'             => str_input('q'),
+            'list_id'       => int_input('list_id') ?: null,
+            'sector'        => str_input('sector') ?: null,
+            'location'      => str_input('location') ?: null,
+            'status'        => in_array(str_input('status'), ['active', 'unsubscribed', 'bounced'], true) ? str_input('status') : null,
+            'verify_status' => in_array(str_input('verify'), ['valid', 'invalid', 'risky', 'unknown', 'unverified'], true) ? str_input('verify') : null,
+        ];
+
+        // Name the file after what's in it, so a folder of exports stays sortable.
+        $parts = ['contacts'];
+        if ($opts['list_id']) {
+            $list = ContactList::find((int) $opts['list_id']);
+            if ($list && (int) $list['user_id'] === $uid) {
+                $parts[] = preg_replace('/[^a-z0-9]+/', '-', strtolower((string) $list['name']));
+            }
+        }
+        if ($opts['verify_status']) {
+            $parts[] = $opts['verify_status'];
+        }
+        $parts[] = date('Y-m-d');
+        $filename = trim(preg_replace('/-+/', '-', implode('-', $parts)), '-') . '.csv';
+
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+        $out = fopen('php://output', 'wb');
+        fwrite($out, "\xEF\xBB\xBF"); // BOM so Excel reads UTF-8 names correctly
+        fputcsv($out, [
+            'email', 'first_name', 'last_name', 'company', 'phone',
+            'sector', 'location', 'lists', 'status', 'verify_status',
+            'verify_reason', 'verified_at', 'added_on',
+        ]);
+
+        // A leading = + - @ makes Excel/Sheets treat the cell as a formula.
+        $safe = static function ($v): string {
+            $v = (string) ($v ?? '');
+            return ($v !== '' && in_array($v[0], ['=', '+', '-', '@', "\t", "\r"], true)) ? "'" . $v : $v;
+        };
+
+        $offset = 0;
+        $batch  = 500;
+        do {
+            $rows = Contact::search($uid, $opts + ['limit' => $batch, 'offset' => $offset]);
+            $listNames = ContactList::namesByContact(array_column($rows, 'id'));
+            foreach ($rows as $c) {
+                fputcsv($out, [
+                    $safe($c['email']),
+                    $safe($c['first_name']),
+                    $safe($c['last_name']),
+                    $safe($c['company']),
+                    $safe($c['phone']),
+                    $safe($c['sector']),
+                    $safe($c['location']),
+                    implode(', ', $listNames[(int) $c['id']] ?? []),
+                    $c['status'],
+                    $c['verify_status'],
+                    $safe($c['verify_reason']),
+                    $c['verified_at'],
+                    $c['created_at'],
+                ]);
+            }
+            flush();
+            $offset += $batch;
+        } while (count($rows) === $batch);
+
+        fclose($out);
+        exit;
+    }
+
+    /**
      * Delete contacts whose verification came back invalid (and optionally
      * risky) — one-click list cleaning after a verify run. Tenant-scoped.
      */

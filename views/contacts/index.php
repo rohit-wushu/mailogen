@@ -9,6 +9,45 @@ $sparkColors = [
   <div class="d-flex gap-2">
     <a href="<?= url('contacts/lists') ?>" class="btn btn-light"><i class="bi bi-collection"></i> Lists</a>
     <a href="<?= url('contacts/import') ?>" class="btn btn-light"><i class="bi bi-upload"></i> Import</a>
+    <?php
+    // Export carries whatever the page is filtered by, so "this list only" and
+    // "only the ones that verified clean" need no separate controls.
+    $exQ = array_filter([
+        'q'        => $filters['q'] ?? '',
+        'list_id'  => $filters['list_id'] ?? '',
+        'sector'   => $filters['sector'] ?? '',
+        'location' => $filters['location'] ?? '',
+        'status'   => $filters['status'] ?? '',
+        'verify'   => $filters['verify_status'] ?? '',
+    ], static fn ($v) => $v !== '' && $v !== null);
+    $exBase  = url('contacts/export');
+    $exUrl   = $exBase . ($exQ ? '?' . http_build_query($exQ) : '');
+    $exValid = $exBase . '?' . http_build_query(['verify' => 'valid'] + $exQ);
+    $listName = '';
+    foreach ($lists as $l) {
+        if ((int) $l['id'] === (int) ($filters['list_id'] ?? 0)) { $listName = $l['name']; }
+    }
+    ?>
+    <div class="btn-group">
+      <a href="<?= e($exUrl) ?>" class="btn btn-light"><i class="bi bi-download"></i> Export</a>
+      <button type="button" class="btn btn-light dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
+      <ul class="dropdown-menu dropdown-menu-end">
+        <li><a class="dropdown-item" href="<?= e($exUrl) ?>">
+          <i class="bi bi-filetype-csv me-2"></i>Export this view
+          <span class="badge bg-secondary-subtle text-secondary-emphasis ms-1"><?= number_format($total) ?></span>
+        </a></li>
+        <li><a class="dropdown-item" href="<?= e($exValid) ?>">
+          <i class="bi bi-patch-check-fill me-2 text-success"></i>Export verified valid only
+        </a></li>
+        <?php if ($listName !== ''): ?>
+          <li><hr class="dropdown-divider"></li>
+          <li><div class="px-3 pb-2 text-muted small" style="max-width:260px">Exporting list <strong><?= e($listName) ?></strong>. Pick “All Lists” below to export everything.</div></li>
+        <?php else: ?>
+          <li><hr class="dropdown-divider"></li>
+          <li><div class="px-3 pb-2 text-muted small" style="max-width:260px">Choose a list in the filter bar to export just that list.</div></li>
+        <?php endif; ?>
+      </ul>
+    </div>
     <?php $unv = (int) ($verifyCounts['unverified'] ?? 0); ?>
     <div class="btn-group">
       <button class="btn btn-light" id="verifyBtn" data-list="<?= (int) ($filters['list_id'] ?? 0) ?>">
