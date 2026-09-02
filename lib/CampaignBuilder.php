@@ -19,6 +19,17 @@ final class CampaignBuilder
     public static function enqueue(array $campaign): int
     {
         $userId = (int) $campaign['user_id'];
+
+        // Pause() holds rows by pushing send_after ~100 years out instead of
+        // changing their status, so it can be undone by Resume() alone. If a
+        // paused campaign is relaunched some other way (e.g. resend) those
+        // rows never pass through Resume() and would stay stranded forever.
+        // Sweep any such leftovers back to "now" whenever we (re)launch.
+        db()->prepare(
+            "UPDATE email_queue SET send_after = NOW()
+             WHERE campaign_id = ? AND status = 'queued' AND send_after > DATE_ADD(NOW(), INTERVAL 1 DAY)"
+        )->execute([(int) $campaign['id']]);
+
         $leads  = self::resolveRecipients($campaign);
 
         $campaign = self::maybeAutoUpgradeToDomain($campaign, count($leads));

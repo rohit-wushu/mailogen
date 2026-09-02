@@ -21,6 +21,9 @@ final class Contact extends Model
         $email = strtolower(trim($data['email']));
         $existing = self::findByEmail($userId, $email);
         if ($existing) {
+            // Deliberately no list_id here: membership is additive and lives
+            // in contact_list_map, so re-importing a known address into a new
+            // list adds it there without removing it from its current lists.
             $fields = array_filter([
                 'first_name' => $data['first_name'] ?? null,
                 'last_name'  => $data['last_name'] ?? null,
@@ -28,11 +31,11 @@ final class Contact extends Model
                 'sector'     => $data['sector'] ?? null,
                 'location'   => $data['location'] ?? null,
                 'phone'      => $data['phone'] ?? null,
-                'list_id'    => $data['list_id'] ?? null,
             ], static fn ($v) => $v !== null && $v !== '');
             if ($fields !== []) {
                 self::update((int) $existing['id'], $fields);
             }
+            ContactList::addMember((int) $existing['id'], isset($data['list_id']) ? (int) $data['list_id'] : null);
             return ['id' => (int) $existing['id'], 'inserted' => false];
         }
 
@@ -50,6 +53,7 @@ final class Contact extends Model
             'tags'       => $data['tags'] ?? null,
             'status'     => 'active',
         ]);
+        ContactList::addMember($id, isset($data['list_id']) ? (int) $data['list_id'] : null);
         return ['id' => $id, 'inserted' => true];
     }
 
@@ -65,7 +69,7 @@ final class Contact extends Model
             array_push($params, $like, $like, $like, $like);
         }
         if (!empty($opts['list_id'])) {
-            $where[] = 'c.list_id = ?';
+            $where[] = 'EXISTS (SELECT 1 FROM contact_list_map m WHERE m.contact_id = c.id AND m.list_id = ?)';
             $params[] = (int) $opts['list_id'];
         }
         if (!empty($opts['sector'])) {
@@ -104,7 +108,7 @@ final class Contact extends Model
             array_push($params, $like, $like, $like, $like);
         }
         if (!empty($opts['list_id'])) {
-            $where[] = 'list_id = ?';
+            $where[] = 'EXISTS (SELECT 1 FROM contact_list_map m WHERE m.contact_id = contacts.id AND m.list_id = ?)';
             $params[] = (int) $opts['list_id'];
         }
         if (!empty($opts['sector'])) {
@@ -153,7 +157,7 @@ final class Contact extends Model
         $sql = "SELECT * FROM contacts WHERE user_id = ? AND status = 'active'";
         $params = [$userId];
         if ($listId) {
-            $sql .= ' AND list_id = ?';
+            $sql .= ' AND EXISTS (SELECT 1 FROM contact_list_map m WHERE m.contact_id = contacts.id AND m.list_id = ?)';
             $params[] = $listId;
         }
         if ($sector !== null && $sector !== '') {
@@ -182,7 +186,7 @@ final class Contact extends Model
         $sql = "SELECT id, email FROM contacts WHERE user_id = ? AND verify_status = 'unverified'";
         $params = [$userId];
         if ($listId) {
-            $sql .= ' AND list_id = ?';
+            $sql .= ' AND EXISTS (SELECT 1 FROM contact_list_map m WHERE m.contact_id = contacts.id AND m.list_id = ?)';
             $params[] = $listId;
         }
         $sql .= ' LIMIT ' . (int) $limit;
@@ -203,7 +207,7 @@ final class Contact extends Model
         $sql = 'SELECT verify_status, COUNT(*) c FROM contacts WHERE user_id = ?';
         $params = [$userId];
         if ($listId) {
-            $sql .= ' AND list_id = ?';
+            $sql .= ' AND EXISTS (SELECT 1 FROM contact_list_map m WHERE m.contact_id = contacts.id AND m.list_id = ?)';
             $params[] = $listId;
         }
         $sql .= ' GROUP BY verify_status';

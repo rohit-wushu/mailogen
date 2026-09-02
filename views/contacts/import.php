@@ -1,4 +1,4 @@
-<?php /** @var array $lists */ ?>
+<?php /** @var array $lists @var string $planName @var int $maxContacts @var int $usedContacts @var int $roomLeft @var string $maxUploadSize */ ?>
 <div class="page-head">
   <div>
     <h2 class="mb-1">Import Contacts</h2>
@@ -16,10 +16,35 @@
         <div class="text-center mb-4">
           <div class="stat-icon grad-violet mx-auto" style="width:64px;height:64px;font-size:1.8rem"><i class="bi bi-filetype-csv"></i></div>
         </div>
+
+        <?php if ($roomLeft >= 0): ?>
+          <?php $quotaPct = $maxContacts > 0 ? min(100, round($usedContacts / $maxContacts * 100)) : 0; ?>
+          <div class="alert <?= $roomLeft === 0 ? 'alert-danger' : ($quotaPct >= 80 ? 'alert-warning' : 'alert-info') ?>">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span>
+                <i class="bi bi-people-fill"></i>
+                <?php if ($roomLeft === 0): ?>
+                  <strong>Contact limit reached.</strong> New contacts in this file will be skipped.
+                <?php else: ?>
+                  Room for <strong><?= number_format($roomLeft) ?></strong> more contact<?= $roomLeft === 1 ? '' : 's' ?>.
+                <?php endif; ?>
+              </span>
+              <span class="small"><?= number_format($usedContacts) ?> / <?= number_format($maxContacts) ?></span>
+            </div>
+            <div class="progress" style="height:6px">
+              <div class="progress-bar <?= $roomLeft === 0 ? 'bg-danger' : ($quotaPct >= 80 ? 'bg-warning' : '') ?>" style="width:<?= max(2, $quotaPct) ?>%"></div>
+            </div>
+            <div class="small mt-2 mb-0">
+              Rows beyond this are skipped — the <?= e($planName) ?> plan allows <?= number_format($maxContacts) ?>.
+              <a href="<?= url('billing') ?>" class="fw-semibold">Upgrade</a> to import more.
+              Contacts you already have are updated and don't use extra room.
+            </div>
+          </div>
+        <?php endif; ?>
         <div class="mb-3">
           <label class="form-label">CSV or Excel file *</label>
           <input type="file" class="form-control" name="file" accept=".csv,.xlsx,text/csv" required>
-          <div class="form-text">Max ~10MB. The first row must be the header.</div>
+          <div class="form-text">Max <?= e((string) $maxUploadSize) ?> (server limit). The first row must be the header.</div>
         </div>
         <div class="mb-3">
           <label class="form-label">Add to list</label>

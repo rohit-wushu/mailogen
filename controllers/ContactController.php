@@ -70,8 +70,10 @@ final class ContactController extends BaseController
                 'sector'     => str_input('sector') ?: null,
                 'location'   => str_input('location') ?: null,
                 'phone'      => str_input('phone') ?: null,
-                'list_id'    => int_input('list_id') ?: null,
             ]);
+            // The edit form's multi-select carries the contact's full intended
+            // set of lists, so this replaces rather than adds.
+            ContactList::setMemberships($id, $this->uid(), (array) ($_POST['list_ids'] ?? []));
             flash('success', 'Contact updated.');
         } else {
             // New contact: reject duplicate emails instead of silently merging.
@@ -84,7 +86,7 @@ final class ContactController extends BaseController
                 flash('error', "You've reached your plan's contact limit ({$plan['max_contacts']}). Upgrade to add more.");
                 redirect('billing');
             }
-            Contact::upsert($this->uid(), [
+            $res = Contact::upsert($this->uid(), [
                 'email'      => $email,
                 'first_name' => str_input('first_name'),
                 'last_name'  => str_input('last_name'),
@@ -92,8 +94,8 @@ final class ContactController extends BaseController
                 'sector'     => str_input('sector'),
                 'location'   => str_input('location'),
                 'phone'      => str_input('phone'),
-                'list_id'    => int_input('list_id') ?: null,
             ]);
+            ContactList::setMemberships((int) $res['id'], $this->uid(), (array) ($_POST['list_ids'] ?? []));
             flash('success', 'Contact saved.');
         }
         $this->back('contacts');
@@ -225,7 +227,7 @@ final class ContactController extends BaseController
         $sql = "UPDATE contacts SET verify_status = 'unverified' WHERE user_id = ?";
         $params = [$this->uid()];
         if ($listId) {
-            $sql .= ' AND list_id = ?';
+            $sql .= ' AND EXISTS (SELECT 1 FROM contact_list_map m WHERE m.contact_id = contacts.id AND m.list_id = ?)';
             $params[] = $listId;
         }
         db()->prepare($sql)->execute($params);
@@ -263,19 +265,42 @@ final class ContactController extends BaseController
                 $this->back('contacts/import');
             }
             $result = $this->importRows($rows, $listId);
+            $rowTotal = max(0, count($rows) - 1); // minus the header row
             $msg = sprintf(
-                'Import complete: %d added, %d updated, %d duplicates merged, %d invalid skipped.',
-                $result['added'], $result['updated'], $result['duplicates'], $result['invalid']
+                '%d of %d rows imported: %d new, %d existing updated, %d duplicate rows merged, %d invalid emails skipped.',
+                $result['added'] + $result['updated'],
+                $rowTotal,
+                $result['added'],
+                $result['updated'],
+                $result['duplicates'],
+                $result['invalid']
             );
             if (!empty($result['skippedQuota'])) {
-                flash('error', $msg . ' ' . $result['skippedQuota'] . ' new contacts skipped — plan limit reached. Upgrade to import more.');
+                // The most common "why didn't everything import?" cause, so it
+                // leads with the number and says exactly what to do about it.
+                flash('error', sprintf(
+                    '%d contacts were NOT imported — your plan\'s contact limit is full. Upgrade to import the rest. (%s)',
+                    $result['skippedQuota'],
+                    $msg
+                ));
             } else {
                 flash('success', $msg);
             }
             redirect('contacts');
         }
+        // Surfaced on the form so a truncated import is predictable rather
+        // than something the user only discovers from the result message.
+        $plan = Billing::effectivePlan($this->user);
+        $max  = (int) $plan['max_contacts'];
+        $used = Billing::contactCount($this->uid());
+
         $this->render('contacts/import', [
-            'lists' => ContactList::withCounts($this->uid()),
+            'lists'         => ContactList::withCounts($this->uid()),
+            'planName'      => $plan['name'] ?? 'your plan',
+            'maxContacts'   => $max,
+            'usedContacts'  => $used,
+            'roomLeft'      => $max < 0 ? -1 : max(0, $max - $used),
+            'maxUploadSize' => ini_get('upload_max_filesize'),
         ], 'Import Contacts');
     }
 

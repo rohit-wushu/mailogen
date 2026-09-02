@@ -17,6 +17,20 @@ function url(string $path = ''): string
     return rtrim(APP_URL, '/') . '/' . ltrim($path, '/');
 }
 
+/**
+ * Same as url(), but appends the file's own mtime as a ?v= cache-buster.
+ * Forces browsers and any intermediary CDN to fetch a fresh copy under a new
+ * cache key whenever the file changes on disk — no manual version bumping,
+ * and no risk of a stale cached asset (e.g. from an earlier broken deploy)
+ * surviving indefinitely.
+ */
+function asset_url(string $path): string
+{
+    $file = BASE_PATH . '/public/' . ltrim($path, '/');
+    $v = is_file($file) ? filemtime($file) : time();
+    return url($path) . '?v=' . $v;
+}
+
 /** Issue a redirect and stop. */
 function redirect(string $path): never
 {

@@ -30,6 +30,7 @@
             <td><?= (int) $u['status'] === 1 ? '<span class="status-pill status-active">Active</span>' : '<span class="status-pill status-unsubscribed">Suspended</span>' ?></td>
             <td class="small text-muted"><?= fmt_dt($u['last_login_at']) ?></td>
             <td class="text-end">
+              <div class="d-flex gap-1 justify-content-end">
               <a href="<?= url('admin/users/view?id=' . (int) $u['id']) ?>" class="btn btn-sm btn-light" title="View details"><i class="bi bi-eye"></i></a>
               <?php if ($u['role'] !== 'admin'): ?>
                 <form method="post" action="<?= url('admin/impersonate') ?>" class="d-inline">
@@ -38,9 +39,10 @@
                 </form>
                 <form method="post" action="<?= url('admin/users/toggle') ?>" class="d-inline">
                   <?= csrf_field() ?><input type="hidden" name="id" value="<?= (int) $u['id'] ?>">
-                  <button class="btn btn-sm btn-light"><?= (int) $u['status'] === 1 ? '<i class="bi bi-lock"></i> Suspend' : '<i class="bi bi-unlock"></i> Activate' ?></button>
+                  <button class="btn btn-sm btn-light" title="<?= (int) $u['status'] === 1 ? 'Suspend' : 'Activate' ?>"><?= (int) $u['status'] === 1 ? '<i class="bi bi-lock"></i>' : '<i class="bi bi-unlock"></i>' ?></button>
                 </form>
               <?php endif; ?>
+              </div>
             </td>
           </tr>
         <?php endforeach; ?>
