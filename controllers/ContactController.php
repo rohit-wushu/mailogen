@@ -295,6 +295,14 @@ final class ContactController extends BaseController
         $processed = 0;
         $failed    = 0;
         foreach ($batch as $c) {
+            // Claim the row before checking it. A lookup can hang until the
+            // proxy gives up on the request, and an address left 'unverified'
+            // is simply first in line again on the next attempt — so one bad
+            // address stalls the whole run at the same spot forever. Moving it
+            // out of 'unverified' up front guarantees the run moves on; the
+            // provisional reason stays only if this request never comes back.
+            Contact::setVerification((int) $c['id'], 'unknown', 'check did not finish');
+
             try {
                 $res = EmailVerifier::verify($c['email'], $deep);
                 Contact::setVerification((int) $c['id'], $res['status'], $res['reason']);

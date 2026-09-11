@@ -25,8 +25,11 @@ declare(strict_types=1);
 
 final class EmailVerifier
 {
-    /** @var array<string, array{0:bool,1:bool,2:array<int,string>}> domain => [hasMx, hasA, mx] */
+    /** @var array<string, array{0:bool,1:bool,2:array<int,string>,3:bool}> domain => [hasMx, hasA, mx, timedOut] */
     private static array $dnsCache = [];
+
+    /** True once a UDP DNS query has succeeded, so a later null means "timed out". */
+    private static bool $socketDnsWorks = false;
 
     /**
      * MX/A lookup for a domain, resolved once per request.
@@ -37,7 +40,7 @@ final class EmailVerifier
      * no timeout argument, so a dead domain can hang on the resolver's own
      * default; RES_OPTIONS bounds that to one short attempt.
      *
-     * @return array{0:bool,1:bool,2:array<int,string>}
+     * @return array{0:bool,1:bool,2:array<int,string>,3:bool} [hasMx, hasA, mx, timedOut]
      */
     private static function domainDns(string $domain): array
     {
@@ -50,11 +53,208 @@ final class EmailVerifier
             $resolverBounded = true;
         }
 
+        // getmxrr() blocks on the system resolver with no timeout we can set —
+        // a cold lookup for an unresponsive nameserver has been measured at
+        // 40s+, which is long enough for a proxy to abandon the whole request.
+        // Ask over a socket we control instead, and only fall back to the
+        // system resolver when that is unavailable (no UDP, odd host setup).
+        // One deadline for the whole domain — MX, the A fallback and any
+        // retry across resolvers all come out of it, so a single address can
+        // never cost more than this no matter how the queries fail.
+        $deadline = microtime(true) + 5.0;
+
+        $mx = self::dnsQuery($domain, 15, $deadline, $socketOpened);   // MX
+        if ($mx !== null) {
+            self::$socketDnsWorks = true;
+            $hasMx = $mx !== [];
+            $a     = $hasMx ? null : self::dnsQuery($domain, 1, $deadline);
+            if (!$hasMx && $a === null) {
+                return self::$dnsCache[$domain] = [false, false, [], true];
+            }
+            return self::$dnsCache[$domain] = [$hasMx, $hasMx || $a !== [], $mx, false];
+        }
+
+        // Nothing came back. A query that reached a resolver and timed out is
+        // exactly the case getmxrr() would hang on for 40s, so fall back only
+        // when no socket could be opened at all — that is the one situation
+        // where the blocking resolver is the only option left.
+        if ($socketOpened || self::$socketDnsWorks) {
+            return self::$dnsCache[$domain] = [false, false, [], true];
+        }
+
         $mx = [];
         $hasMx = @getmxrr($domain, $mx) && $mx !== [];
         $hasA  = $hasMx ? true : @checkdnsrr($domain, 'A');
 
-        return self::$dnsCache[$domain] = [$hasMx, $hasA, $mx];
+        return self::$dnsCache[$domain] = [$hasMx, $hasA, $mx, false];
+    }
+
+    /**
+     * One DNS query with a timeout we enforce ourselves.
+     *
+     * Returns the answers (MX exchanges in preference order for type 15, or a
+     * non-empty marker list for type 1), [] when the name resolves to nothing,
+     * or null when the query could not be completed — the caller then falls
+     * back to PHP's resolver rather than treating "no answer" as "no domain".
+     *
+     * @return array<int,string>|null
+     */
+    private static function dnsQuery(string $domain, int $type, float $deadline, ?bool &$socketOpened = null): ?array
+    {
+        $socketOpened = false;
+        foreach (self::resolvers() as $server) {
+            $left = $deadline - microtime(true);
+            if ($left <= 0.2) {
+                return null;    // out of time — let the caller decide
+            }
+            $timeout = min(2.0, $left);
+
+            $sock = @stream_socket_client("udp://{$server}:53", $errno, $errstr, $timeout);
+            if ($sock === false) {
+                continue;
+            }
+            $socketOpened = true;
+            stream_set_timeout($sock, (int) $timeout, (int) (fmod($timeout, 1) * 1e6));
+
+            $id    = random_int(0, 0xFFFF);
+            $qname = '';
+            foreach (explode('.', $domain) as $label) {
+                $qname .= chr(strlen($label)) . $label;
+            }
+            $qname .= "\0";
+            $packet = pack('nnnnnn', $id, 0x0100, 1, 0, 0, 0) . $qname . pack('nn', $type, 1);
+
+            if (@fwrite($sock, $packet) === false) {
+                fclose($sock);
+                continue;
+            }
+            $resp = @fread($sock, 4096);
+            $meta = stream_get_meta_data($sock);
+            fclose($sock);
+
+            if ($meta['timed_out'] || !is_string($resp) || strlen($resp) < 12) {
+                continue;   // try the next resolver
+            }
+
+            $parsed = self::parseDnsAnswers($resp, $type);
+            if ($parsed !== null) {
+                return $parsed;
+            }
+        }
+        return null;   // could not get an answer from any resolver
+    }
+
+    /**
+     * Minimal answer-section reader for the two record types we ask about.
+     *
+     * @return array<int,string>|null
+     */
+    private static function parseDnsAnswers(string $resp, int $wantType): ?array
+    {
+        $hdr = unpack('nid/nflags/nqd/nan/nns/nar', substr($resp, 0, 12));
+        if ($hdr === false) {
+            return null;
+        }
+        $rcode = $hdr['flags'] & 0x000F;
+        if ($rcode === 3) {
+            return [];      // NXDOMAIN — a definite "no such name"
+        }
+        if ($rcode !== 0) {
+            return null;    // SERVFAIL and friends: inconclusive
+        }
+
+        $off = 12;
+        // Skip the question section.
+        for ($i = 0; $i < $hdr['qd']; $i++) {
+            $off = self::skipName($resp, $off);
+            $off += 4;
+        }
+
+        $answers = [];
+        $mx = [];
+        for ($i = 0; $i < $hdr['an']; $i++) {
+            $off = self::skipName($resp, $off);
+            if ($off + 10 > strlen($resp)) {
+                return null;
+            }
+            $rr = unpack('ntype/nclass/Nttl/nlen', substr($resp, $off, 10));
+            $off += 10;
+            $rdata = $off;
+            $off += $rr['len'];
+
+            if ($rr['type'] !== $wantType) {
+                continue;
+            }
+            if ($wantType === 15) {
+                $pref = unpack('n', substr($resp, $rdata, 2))[1];
+                $mx[] = [$pref, self::readName($resp, $rdata + 2)];
+            } else {
+                $answers[] = 'a';
+            }
+        }
+
+        if ($wantType === 15) {
+            usort($mx, static fn ($a, $b) => $a[0] <=> $b[0]);
+            return array_map(static fn ($m) => $m[1], $mx);
+        }
+        return $answers;
+    }
+
+    private static function skipName(string $buf, int $off): int
+    {
+        while ($off < strlen($buf)) {
+            $len = ord($buf[$off]);
+            if ($len === 0) {
+                return $off + 1;
+            }
+            if (($len & 0xC0) === 0xC0) {
+                return $off + 2;    // compression pointer ends the name
+            }
+            $off += $len + 1;
+        }
+        return $off;
+    }
+
+    private static function readName(string $buf, int $off, int $depth = 0): string
+    {
+        $parts = [];
+        while ($off < strlen($buf) && $depth < 10) {
+            $len = ord($buf[$off]);
+            if ($len === 0) {
+                break;
+            }
+            if (($len & 0xC0) === 0xC0) {
+                $ptr = ((($len & 0x3F) << 8) | ord($buf[$off + 1]));
+                $parts[] = self::readName($buf, $ptr, $depth + 1);
+                break;
+            }
+            $parts[] = substr($buf, $off + 1, $len);
+            $off += $len + 1;
+        }
+        return implode('.', array_filter($parts));
+    }
+
+    /** Resolvers to ask, system first. @return array<int,string> */
+    private static function resolvers(): array
+    {
+        static $list = null;
+        if ($list !== null) {
+            return $list;
+        }
+        $list = [];
+        if (is_readable('/etc/resolv.conf')) {
+            foreach (file('/etc/resolv.conf', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $l) {
+                // Full IPv4 only. A looser pattern takes "2409" off an IPv6
+                // nameserver line, and every lookup then burns its first
+                // attempt on an address that cannot answer.
+                if (preg_match('/^\s*nameserver\s+((?:\d{1,3}\.){3}\d{1,3})\s*$/', $l, $m)
+                    && filter_var($m[1], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                    $list[] = $m[1];
+                }
+            }
+        }
+        $list = array_slice(array_merge($list, ['8.8.8.8', '1.1.1.1']), 0, 3);
+        return $list;
     }
 
     private const ROLE = [
@@ -192,7 +392,13 @@ final class EmailVerifier
         }
 
         // ---- 6. DNS / MX ----------------------------------------------
-        [$hasMx, $hasA, $mx] = self::domainDns($domain);
+        [$hasMx, $hasA, $mx, $dnsTimedOut] = self::domainDns($domain);
+        if ($dnsTimedOut) {
+            // Say so rather than guessing. Calling it invalid here would let
+            // "Remove invalid" delete good addresses over a slow nameserver.
+            $add('mx', 'Domain & MX', 'warn', 'domain lookup timed out');
+            return self::result('unknown', 50, 'could not check domain in time — try again', $email, $suggestion, $flags, $checks);
+        }
         if (!$hasMx && !$hasA) {
             $add('mx', 'Domain & MX', 'fail', 'no mail server for this domain');
             $reason = $suggestion ? "domain has no mail server — did you mean {$suggestion}?" : 'no mail server (MX) for domain';
