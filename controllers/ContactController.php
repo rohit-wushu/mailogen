@@ -283,21 +283,45 @@ final class ContactController extends BaseController
         // Deep checks are slow (a few seconds each) so process fewer per request.
         $batch  = Contact::unverifiedBatch($this->uid(), $listId, $deep ? 5 : 20);
 
+        // A batch has to finish well inside PHP's execution limit. DNS lookups
+        // have no timeout we control and are far slower on a shared host than
+        // in dev, so a fixed batch size that is fine locally can run past the
+        // limit in production — the request then dies mid-batch and the client
+        // gets an error page instead of JSON. Return whatever is done by the
+        // budget instead; the client simply asks for the next batch.
+        $limit  = (int) ini_get('max_execution_time');
+        $budget = $limit > 0 ? max(5.0, $limit * 0.5) : 20.0;
+        $start  = microtime(true);
+
         $processed = 0;
+        $failed    = 0;
         foreach ($batch as $c) {
-            $res = EmailVerifier::verify($c['email'], $deep);
-            Contact::setVerification((int) $c['id'], $res['status'], $res['reason']);
-            // Mirror hard-invalid into the send status so it's excluded everywhere.
-            if ($res['status'] === 'invalid') {
-                Contact::markStatusByEmail($this->uid(), $c['email'], 'bounced');
+            try {
+                $res = EmailVerifier::verify($c['email'], $deep);
+                Contact::setVerification((int) $c['id'], $res['status'], $res['reason']);
+                // Mirror hard-invalid into the send status so it's excluded everywhere.
+                if ($res['status'] === 'invalid') {
+                    Contact::markStatusByEmail($this->uid(), $c['email'], 'bounced');
+                }
+            } catch (\Throwable $e) {
+                // One unresolvable address must not abort the whole run. Mark it
+                // 'unknown' so the next batch moves past it rather than looping.
+                Contact::setVerification((int) $c['id'], 'unknown', 'check failed');
+                SystemLog::write('warning', 'contacts.verify', "Verify failed for {$c['email']}: " . $e->getMessage(), $this->uid());
+                $failed++;
             }
             $processed++;
+
+            if (microtime(true) - $start > $budget) {
+                break;
+            }
         }
 
         $counts    = Contact::verifyCounts($this->uid(), $listId);
         json_response([
             'ok'        => true,
             'processed' => $processed,
+            'failed'    => $failed,
             'remaining' => $counts['unverified'],
             'counts'    => $counts,
         ]);

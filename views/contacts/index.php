@@ -363,16 +363,33 @@ async function runVerify(deep) {
   bar.classList.add('progress-bar-animated', 'progress-bar-striped');
   let totalStart = 0;
 
+  let aborted = false;
+  let retries = 0;
+
   while (true) {
     let res;
     try {
-      res = await fetch('<?= url('contacts/verify') ?>', {
+      const r = await fetch('<?= url('contacts/verify') ?>', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
         body: new URLSearchParams({ list_id: listId, deep: deep ? '1' : '', _csrf: window.CSRF })
-      }).then(r => r.json());
-    } catch (e) { window.toast('Verification failed. Please retry.', 'error'); break; }
-    if (!res.ok) { window.toast('Verification error.', 'error'); break; }
+      });
+      // A batch killed by the server's execution limit answers with an error
+      // page, not JSON — treat that as a retryable hiccup rather than success.
+      if (!r.ok) { throw new Error('HTTP ' + r.status); }
+      res = await r.json();
+    } catch (e) {
+      // Addresses already checked are saved, so resuming costs nothing.
+      if (++retries <= 3) {
+        stat.textContent = 'hit a snag — retrying (' + retries + '/3)…';
+        await new Promise(s => setTimeout(s, 2000 * retries));
+        continue;
+      }
+      aborted = true;
+      break;
+    }
+    if (!res.ok) { aborted = true; break; }
+    retries = 0;
 
     const done = res.counts.valid + res.counts.invalid + res.counts.risky + res.counts.unknown;
     const total = done + res.remaining;
@@ -389,6 +406,22 @@ async function runVerify(deep) {
     if (res.remaining <= 0 || res.processed === 0) break;
   }
   bar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+
+  if (aborted) {
+    // Don't claim success and reload the panel away — say what stopped, and
+    // leave the numbers on screen so it's clear how far the run actually got.
+    bar.classList.add('bg-warning');
+    stat.textContent += ' — stopped early';
+    panel.querySelector('.fw-semibold').innerHTML =
+      '<i class="bi bi-exclamation-triangle-fill text-warning"></i> Verification stopped before finishing';
+    tally.insertAdjacentHTML('beforeend',
+      '<span class="text-muted">Addresses already checked are saved. ' +
+      'Click <strong>Verify emails</strong> again to carry on from here.</span>');
+    btn.disabled = false;
+    window.toast('Verification stopped early — checked addresses were saved. Run it again to continue.', 'error');
+    return;
+  }
+
   window.toast('Verification complete.', 'success');
   setTimeout(() => location.reload(), 1200);
 }
