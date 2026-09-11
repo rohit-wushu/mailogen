@@ -62,6 +62,29 @@ if (PHP_SAPI !== 'cli') {
                . '<h1>Something went wrong</h1><p>Please try again in a moment.</p></div>';
         }
     });
+
+    // set_exception_handler never sees a fatal — an execution timeout or an
+    // exhausted memory limit ends the request without throwing, which is
+    // exactly how a long AJAX batch fails in production. Log those too, or
+    // they leave no trace anywhere.
+    register_shutdown_function(static function (): void {
+        $e = error_get_last();
+        if ($e === null || !in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+            return;
+        }
+        error_log(sprintf(
+            '[mailogen] FATAL(%d): %s in %s:%d | url=%s | ran %.1fs of %ss limit, peak mem %.1fMB of %s',
+            $e['type'],
+            $e['message'],
+            $e['file'],
+            $e['line'],
+            $_SERVER['REQUEST_URI'] ?? 'cli',
+            microtime(true) - (float) ($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true)),
+            ini_get('max_execution_time'),
+            memory_get_peak_usage(true) / 1048576,
+            ini_get('memory_limit')
+        ));
+    });
 }
 
 // -------------------------------------------------------------------

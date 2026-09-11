@@ -25,6 +25,38 @@ declare(strict_types=1);
 
 final class EmailVerifier
 {
+    /** @var array<string, array{0:bool,1:bool,2:array<int,string>}> domain => [hasMx, hasA, mx] */
+    private static array $dnsCache = [];
+
+    /**
+     * MX/A lookup for a domain, resolved once per request.
+     *
+     * A contact list repeats domains heavily (every gmail.com address, every
+     * address at one company), and these lookups are the slow part of
+     * verification — on a shared host they dominate it. getmxrr() also takes
+     * no timeout argument, so a dead domain can hang on the resolver's own
+     * default; RES_OPTIONS bounds that to one short attempt.
+     *
+     * @return array{0:bool,1:bool,2:array<int,string>}
+     */
+    private static function domainDns(string $domain): array
+    {
+        if (isset(self::$dnsCache[$domain])) {
+            return self::$dnsCache[$domain];
+        }
+        static $resolverBounded = false;
+        if (!$resolverBounded) {
+            putenv('RES_OPTIONS=timeout:3 attempts:1');
+            $resolverBounded = true;
+        }
+
+        $mx = [];
+        $hasMx = @getmxrr($domain, $mx) && $mx !== [];
+        $hasA  = $hasMx ? true : @checkdnsrr($domain, 'A');
+
+        return self::$dnsCache[$domain] = [$hasMx, $hasA, $mx];
+    }
+
     private const ROLE = [
         'admin', 'administrator', 'info', 'support', 'sales', 'contact', 'help', 'office',
         'billing', 'webmaster', 'postmaster', 'hostmaster', 'abuse', 'noreply', 'no-reply',
@@ -160,9 +192,7 @@ final class EmailVerifier
         }
 
         // ---- 6. DNS / MX ----------------------------------------------
-        $mx = [];
-        $hasMx = getmxrr($domain, $mx) && $mx !== [];
-        $hasA  = $hasMx ? true : checkdnsrr($domain, 'A');
+        [$hasMx, $hasA, $mx] = self::domainDns($domain);
         if (!$hasMx && !$hasA) {
             $add('mx', 'Domain & MX', 'fail', 'no mail server for this domain');
             $reason = $suggestion ? "domain has no mail server — did you mean {$suggestion}?" : 'no mail server (MX) for domain';

@@ -283,14 +283,13 @@ final class ContactController extends BaseController
         // Deep checks are slow (a few seconds each) so process fewer per request.
         $batch  = Contact::unverifiedBatch($this->uid(), $listId, $deep ? 5 : 20);
 
-        // A batch has to finish well inside PHP's execution limit. DNS lookups
-        // have no timeout we control and are far slower on a shared host than
-        // in dev, so a fixed batch size that is fine locally can run past the
-        // limit in production — the request then dies mid-batch and the client
-        // gets an error page instead of JSON. Return whatever is done by the
-        // budget instead; the client simply asks for the next batch.
+        // A batch has to finish before anything upstream gives up on it, and
+        // PHP's own max_execution_time is not that limit: a proxy in front
+        // (LiteSpeed on shared hosting) returns 504 well before PHP would
+        // stop. So the budget is a small absolute number rather than a share
+        // of max_execution_time, and the client just asks for more batches.
         $limit  = (int) ini_get('max_execution_time');
-        $budget = $limit > 0 ? max(5.0, $limit * 0.5) : 20.0;
+        $budget = $limit > 0 ? min(8.0, max(3.0, $limit * 0.5)) : 8.0;
         $start  = microtime(true);
 
         $processed = 0;
